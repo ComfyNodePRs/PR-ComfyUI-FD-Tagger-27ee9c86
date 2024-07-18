@@ -1,1 +1,5 @@
-onnxruntime
+pillow
+requests
+aiohttp
+torch
+torchvision

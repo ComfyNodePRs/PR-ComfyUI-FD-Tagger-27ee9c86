@@ -2,12 +2,12 @@ import { app } from "../../../scripts/app.js";
 import { ComfyWidgets } from "../../../scripts/widgets.js";
 import { api } from "../../../scripts/api.js";
 
-class Pysssss {
+class FDTagger {
 	constructor() {
-		if (!window.__pysssss__) {
-			window.__pysssss__ = Symbol("__pysssss__");
+		if (!window.__fdtagger__) {
+			window.__fdtagger__ = Symbol("__fdtagger__");
 		}
-		this.symbol = window.__pysssss__;
+		this.symbol = window.__fdtagger__;
 	}
 
 	getState(node) {
@@ -30,7 +30,7 @@ class Pysssss {
 			statusTagHandler: true,
 		};
 
-		api.addEventListener("pysssss/update_status", ({ detail }) => {
+		api.addEventListener("furrydiffusion/update_status", ({ detail }) => {
 			let { node, progress, text } = detail;
 			const n = app.graph.getNodeById(+(node || app.runningNodeId));
 			if (!n) return;
@@ -73,14 +73,14 @@ class Pysssss {
 	}
 }
 
-const pysssss = new Pysssss();
+const fdtagger = new FDTagger();
 
 app.registerExtension({
-	name: "pysssss.Wd14Tagger",
+	name: "furrydiffusion.FDTagger",
 	async beforeRegisterNodeDef(nodeType, nodeData, app) {
-		pysssss.addStatusTagHandler(nodeType);
+		fdtagger.addStatusTagHandler(nodeType);
 
-		if (nodeData.name === "WD14Tagger|pysssss") {
+		if (nodeData.name === "FDTagger|fdtagger") {
 			const onExecuted = nodeType.prototype.onExecuted;
 			nodeType.prototype.onExecuted = function (message) {
 				const r = onExecuted?.apply?.(this, arguments);
@@ -124,10 +124,10 @@ app.registerExtension({
 						pos++;
 					}
 					options.splice(pos, 0, {
-						content: "WD14 Tagger",
+						content:"Furry Diffusion Tagger",
 						callback: async () => {
 							let src = img.src;
-							src = src.replace("/view?", `/pysssss/wd14tagger/tag?node=${this.id}&clientId=${api.clientId}&`);
+							src = src.replace("/view?", `/furrydiffusion/fdtagger/tag?node=${this.id}&clientId=${api.clientId}&`);
 							const res = await (await fetch(src)).json();
 							alert(res);
 						},

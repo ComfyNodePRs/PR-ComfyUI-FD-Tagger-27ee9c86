@@ -4,20 +4,22 @@ import json
 import shutil
 import inspect
 import aiohttp
-from server import PromptServer
+from typing import List, Dict, Any, Callable, Optional
+from aiohttp import ClientSession
 from tqdm import tqdm
+from server import PromptServer
 
-config = None
+config: Optional[Dict[str, Any]] = None
 
 
-def is_logging_enabled():
+def is_logging_enabled() -> bool:
     config = get_extension_config()
     if "logging" not in config:
         return False
     return config["logging"]
 
 
-def log(message, type=None, always=False):
+def log(message: str, type: Optional[str] = None, always: bool = False) -> None:
     if not always and not is_logging_enabled():
         return
 
@@ -26,10 +28,10 @@ def log(message, type=None, always=False):
 
     name = get_extension_config()["name"]
 
-    print(f"(pysssss:{name}) {message}")
+    print(f"fd_tagger:{name}) {message}")
 
 
-def get_ext_dir(subpath=None, mkdir=False):
+def get_ext_dir(subpath: Optional[str] = None, mkdir: bool = False) -> str:
     dir = os.path.dirname(__file__)
     if subpath is not None:
         dir = os.path.join(dir, subpath)
@@ -41,7 +43,7 @@ def get_ext_dir(subpath=None, mkdir=False):
     return dir
 
 
-def get_comfy_dir(subpath=None):
+def get_comfy_dir(subpath: Optional[str] = None) -> str:
     dir = os.path.dirname(inspect.getfile(PromptServer))
     if subpath is not None:
         dir = os.path.join(dir, subpath)
@@ -51,35 +53,35 @@ def get_comfy_dir(subpath=None):
     return dir
 
 
-def get_web_ext_dir():
+def get_web_ext_dir() -> str:
     config = get_extension_config()
     name = config["name"]
-    dir = get_comfy_dir("web/extensions/pysssss")
+    dir = get_comfy_dir("web/extensions/furrydiffusion")
     if not os.path.exists(dir):
         os.makedirs(dir)
     dir += "/" + name
     return dir
 
 
-def get_extension_config(reload=False):
+def get_extension_config(reload: bool = False) -> Dict[str, Any]:
     global config
-    if reload == False and config is not None:
+    if not reload and config is not None:
         return config
 
-    config_path = get_ext_dir("pysssss.user.json")
+    config_path = get_ext_dir("config.user.json")
     if not os.path.exists(config_path):
-        config_path = get_ext_dir("pysssss.json")
+        config_path = get_ext_dir("config.json")
 
     if not os.path.exists(config_path):
-        log("Missing pysssss.json and pysssss.user.json, this extension may not work correctly. Please reinstall the extension.",
-            type="ERROR", always=True)
+        log("Missing config.json and config.user.json, this extension may not work correctly. Please reinstall the extension.", type="ERROR", always=True)
         print(f"Extension path: {get_ext_dir()}")
         return {"name": "Unknown", "version": -1}
     with open(config_path, "r") as f:
         config = json.loads(f.read())
     return config
 
-def link_js(src, dst):
+
+def link_js(src: str, dst: str) -> bool:
     src = os.path.abspath(src)
     dst = os.path.abspath(dst)
     if os.name == "nt":
@@ -98,7 +100,7 @@ def link_js(src, dst):
         return False
 
 
-def is_junction(path):
+def is_junction(path: str) -> bool:
     if os.name != "nt":
         return False
     try:
@@ -106,7 +108,8 @@ def is_junction(path):
     except OSError:
         return False
 
-def install_js():
+
+def install_js() -> None:
     src_dir = get_ext_dir("web/js")
     if not os.path.exists(src_dir):
         log("No JS")
@@ -114,7 +117,7 @@ def install_js():
 
     should_install = should_install_js()
     if should_install:
-        log("it looks like you're running an old version of ComfyUI that requires manual setup of web files, it is recommended you update your installation.", "warning", True)
+        log("It looks like you're running an old version of ComfyUI that requires manual setup of web files, it is recommended you update your installation.", "warning", True)
     dst_dir = get_web_ext_dir()
     linked = os.path.islink(dst_dir) or is_junction(dst_dir)
     if linked or os.path.exists(dst_dir):
@@ -128,11 +131,11 @@ def install_js():
             shutil.rmtree(dst_dir)
             log("JS deleted, PromptServer will serve extension")
         return
-    
+
     if not should_install:
         log("JS skipped, PromptServer will serve extension")
         return
-    
+
     if link_js(src_dir, dst_dir):
         log("JS linked")
         return
@@ -141,11 +144,11 @@ def install_js():
     shutil.copytree(src_dir, dst_dir, dirs_exist_ok=True)
 
 
-def should_install_js():
+def should_install_js() -> bool:
     return not hasattr(PromptServer.instance, "supports") or "custom_nodes_from_web" not in PromptServer.instance.supports
 
 
-def init(check_imports):
+def init(check_imports: Optional[List[str]]) -> bool:
     log("Init")
 
     if check_imports is not None:
@@ -153,14 +156,15 @@ def init(check_imports):
         for imp in check_imports:
             spec = importlib.util.find_spec(imp)
             if spec is None:
-                log(f"{imp} is required, please check requirements are installed.", type="ERROR", always=True)
+                log(f"{imp} is required, please check requirements are installed.",
+                    type="ERROR", always=True)
                 return False
 
     install_js()
     return True
 
 
-async def download_to_file(url, destination, update_callback, is_ext_subpath=True, session=None):
+async def download_to_file(url: str, destination: str, update_callback: Optional[Callable[[int], None]], is_ext_subpath: bool = True, session: Optional[ClientSession] = None) -> None:
     close_session = False
     if session is None:
         close_session = True
@@ -197,10 +201,10 @@ async def download_to_file(url, destination, update_callback, is_ext_subpath=Tru
             await session.close()
 
 
-def wait_for_async(async_fn, loop=None):
-    res = []
+def wait_for_async(async_fn: Callable[[], Any], loop: Optional[asyncio.AbstractEventLoop] = None) -> Any:
+    res: List[Any] = []
 
-    async def run_async():
+    async def run_async() -> None:
         r = await async_fn()
         res.append(r)
 
@@ -215,27 +219,29 @@ def wait_for_async(async_fn, loop=None):
 
     return res[0]
 
-def update_node_status(client_id, node, text, progress=None):
+
+def update_node_status(client_id: Optional[str], node: str, text: str, progress: Optional[float] = None) -> None:
     if client_id is None:
         client_id = PromptServer.instance.client_id
 
     if client_id is None:
         return
 
-    PromptServer.instance.send_sync("pysssss/update_status", {
+    PromptServer.instance.send_sync("furrydiffusion/update_status", {
         "node": node,
         "progress": progress,
         "text": text
     }, client_id)
 
-async def update_node_status_async(client_id, node, text, progress=None):
+
+async def update_node_status_async(client_id: Optional[str], node: str, text: str, progress: Optional[float] = None) -> None:
     if client_id is None:
         client_id = PromptServer.instance.client_id
 
     if client_id is None:
         return
 
-    await PromptServer.instance.send("pysssss/update_status", {
+    await PromptServer.instance.send("furrydiffusion/update_status", {
         "node": node,
         "progress": progress,
         "text": text
