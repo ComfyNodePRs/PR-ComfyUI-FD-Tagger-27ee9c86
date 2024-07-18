@@ -1,4 +1,5 @@
-# ComfyUI WD 1.4 Tagger (Furry Diffusion Branch)
+# ComfyUI-FD-Tagger
+## E621 image interrogation and auto-captioning
 
 A [ComfyUI](https://github.com/comfyanonymous/ComfyUI) extension allowing the interrogation of Furry Diffusion tags from images using JTP tag inference.
 
