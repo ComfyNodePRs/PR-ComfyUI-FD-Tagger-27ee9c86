@@ -9,6 +9,8 @@ from torchvision.transforms import InterpolationMode
 import torchvision.transforms.functional as TF
 import safetensors.torch
 
+from .comfynode import log
+
 
 class Fit(torch.nn.Module):
     def __init__(self, bounds: Union[Tuple[int, int], int], interpolation: InterpolationMode = InterpolationMode.LANCZOS, grow: bool = True, pad: Union[float, None] = None) -> None:
@@ -113,6 +115,7 @@ class JtpInference:
         model = timm.create_model(
             "vit_so400m_patch14_siglip_384.webli", pretrained=False, num_classes=9083)
         if self.version == 1:
+            log("Loading vit model Version 1", "INFO", True)
             model.head = torch.nn.Sequential(
                 torch.nn.Linear(model.head.in_features,
                                 model.head.out_features * 2),
@@ -121,11 +124,13 @@ class JtpInference:
             )
             model.load_state_dict(torch.load(
                 filename=model_path, map_location=self.device))
-        if self.version == 2:
+        elif self.version == 2:
+            log("Loading vit model Version 2", "INFO", True)
             model.head = GatedHead(min(model.head.weight.shape), 9083)
             safetensors.torch.load_model(
                 model=model, filename=model_path, device=self.device)
         else:
+            log(f"Invalid model version: {self.version}", "ERROR", True)
             raise ValueError(f"Invalid model version: {self.version}")
         model.eval()
         model.to(self.device)
