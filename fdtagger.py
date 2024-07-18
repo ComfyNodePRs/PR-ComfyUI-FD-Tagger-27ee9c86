@@ -49,12 +49,11 @@ async def tag(image: np.ndarray, model_name: str, threshold: float = 0.35, exclu
 
     model_path: str = os.path.join(models_dir, model_name + ".safetensors")
     tags_path: str = os.path.join(models_dir, model_name + ".json")
-    device = torch.device(
-            'cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     version: int = config["models"][model_name]["version"]
-    classifier = JtpInference(model_path, tags_path, device, version)
+    classifier = JtpInference(model_path=model_path, tags_path=tags_path, device=device, version=version)
     input_image = Image.fromarray(image).convert('RGBA')
-    tag_string, _ = classifier.run_classifier(input_image, threshold)
+    tag_string, _ = classifier.run_classifier(image=input_image, threshold=threshold, exclude_tags=exclude_tags, replace_underscore=replace_underscore, trailing_comma=trailing_comma)
     return tag_string
 
 

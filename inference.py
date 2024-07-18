@@ -103,8 +103,7 @@ class GatedHead(torch.nn.Module):
 class JtpInference:
     def __init__(self, model_path: str, tags_path: str, device: Union[torch.device, None] = None, version: int = 1) -> None:
         torch.set_grad_enabled(False)
-        self.device = device if device else torch.device(
-            'cuda' if torch.cuda.is_available() else 'cpu')
+        self.device = device if device is not None else torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.model = self._load_model(model_path, version)
         self.transform = self._get_transform()
         self.allowed_tags = self._load_tags(tags_path)
@@ -112,26 +111,21 @@ class JtpInference:
     def _load_model(self, model_path: str, version: int) -> torch.nn.Module:
         model_name = model_path.split(os.sep)[-1].split(".")[0]
         model = timm.create_model("vit_so400m_patch14_siglip_384.webli", pretrained=False, num_classes=9083)
-        if version == 1:
-            log(f"Loading vit model: {model_name} Version: {self.version}", "INFO", True)
-            model.head = torch.nn.Sequential(
-                torch.nn.Linear(model.head.in_features,
-                                model.head.out_features * 2),
-                torch.nn.Sigmoid(),
-                torch.nn.Linear(model.head.out_features * 2, 9083)
-            )
-            model.load_state_dict(torch.load(
-                filename=model_path, map_location=self.device))
-        if version == 2:
-            log(f"Loading vit model: {model_name} Version: {self.version}", "INFO", True)
+        if f"{version}" == "1":
+            log(f"Loading vit model: {model_name} (Version: {version})", "INFO", True)
+            safetensors.torch.load_model(model=model, filename=model_path)
+        elif f"{version}" == "2":
+            log(f"Loading vit model: {model_name} (Version: {version})", "INFO", True)
             model.head = GatedHead(min(model.head.weight.shape), 9083)
-            safetensors.torch.load_model(
-                model=model, filename=model_path, device=self.device)
+            safetensors.torch.load_model(model=model, filename=model_path)
+        else:
+            raise ValueError(f"Invalid model version: {version}")
         
+        if torch.cuda.is_available() is True and self.device.type == "cuda":
+            if torch.cuda.get_device_capability()[0] >= 7:
+                model.cuda()
+                model.to(dtype=torch.float16, memory_format=torch.channels_last)
         model.eval()
-        model.to(self.device)
-        if self.device.type == 'cuda' and torch.cuda.get_device_capability()[0] >= 7:
-            model.to(dtype=torch.float16, memory_format=torch.channels_last)
         return model
 
     def _get_transform(self) -> transforms.Compose:
@@ -147,28 +141,25 @@ class JtpInference:
     def _load_tags(self, tags_path: str) -> List[str]:
         with open(tags_path, "r") as file:
             tags = json.load(file)
-        
-        return [tag.replace("_", " ") for tag in tags.keys()]
+        return [tag.replace("_", " ").lstrip().rstrip() for tag in tags.keys() if tag.isspace() is False]
 
-    def _create_tags(self, tag_score: Dict[str, float], threshold: float) -> Tuple[str, Dict[str, float]]:
-        filtered_tag_score = {key: value for key,
-                              value in tag_score.items() if value > threshold}
-        return ", ".join(filtered_tag_score.keys()), filtered_tag_score
-
-    def run_classifier(self, image: Image, threshold: float) -> Tuple[str, Dict[str, float]]:
+    def run_classifier(self, image: Image, threshold: float, exclude_tags: str = "", replace_underscore: bool = True, trailing_comma: bool = False) -> Tuple[str, Dict[str, float]]:
         img = image.convert('RGBA')
         tensor = self.transform(img).unsqueeze(0).to(self.device)
-        if self.device.type == 'cuda' and torch.cuda.get_device_capability()[0] >= 7:
-            tensor = tensor.to(dtype=torch.float16,
-                               memory_format=torch.channels_last)
+        if self.device.type == 'cuda' and torch.cuda.is_available():
+            tensor.cuda()
+            if torch.cuda.get_device_capability()[0] >= 7:
+                tensor = tensor.to(dtype=torch.float16, memory_format=torch.channels_last)
         
         with torch.no_grad():
             logits = self.model(tensor)
             probits = torch.nn.functional.sigmoid(logits[0]).cpu()
             values, indices = probits.topk(250)
         
-        tag_score = {self.allowed_tags[indices[i]]: values[i].item(
-        ) for i in range(indices.size(0))}
-        sorted_tag_score = dict(
-            sorted(tag_score.items(), key=lambda item: item[1], reverse=True))
-        return self._create_tags(sorted_tag_score, threshold)
+        corrected_excuded_tags = [tag.replace("_", " ").lstrip().rstrip() for tag in exclude_tags.split(",") if tag.isspace() is False]
+        tag_score = {self.allowed_tags[indices[i]]: values[i].item() for i in range(indices.size(0)) if self.allowed_tags[indices[i]] not in corrected_excuded_tags}
+        if replace_underscore is False:
+            tag_score = {key.replace(" ", "_"): value for key, value in tag_score.items()}
+        tag_score = dict(sorted(tag_score.items(), key=lambda item: item[1], reverse=True))
+        tag_score = {key: value for key, value in tag_score.items() if value > threshold}
+        return ", ".join(tag_score.keys()) + ("," if trailing_comma is True else ""), tag_score
