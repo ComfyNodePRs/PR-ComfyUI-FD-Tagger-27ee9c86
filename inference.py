@@ -105,17 +105,15 @@ class JtpInference:
         torch.set_grad_enabled(False)
         self.device = device if device else torch.device(
             'cuda' if torch.cuda.is_available() else 'cpu')
-        self.version = version
-        self.model = self._load_model(model_path)
+        self.model = self._load_model(model_path, version)
         self.transform = self._get_transform()
         self.allowed_tags = self._load_tags(tags_path)
 
-    def _load_model(self, model_path: str) -> torch.nn.Module:
+    def _load_model(self, model_path: str, version: int) -> torch.nn.Module:
         model_name = model_path.split(os.sep)[-1].split(".")[0]
-        model = timm.create_model(
-            "vit_so400m_patch14_siglip_384.webli", pretrained=False, num_classes=9083)
-        if self.version == 1:
-            log("Loading vit model Version 1", "INFO", True)
+        model = timm.create_model("vit_so400m_patch14_siglip_384.webli", pretrained=False, num_classes=9083)
+        if version == 1:
+            log(f"Loading vit model: {model_name} Version: {self.version}", "INFO", True)
             model.head = torch.nn.Sequential(
                 torch.nn.Linear(model.head.in_features,
                                 model.head.out_features * 2),
@@ -124,14 +122,12 @@ class JtpInference:
             )
             model.load_state_dict(torch.load(
                 filename=model_path, map_location=self.device))
-        elif self.version == 2:
-            log("Loading vit model Version 2", "INFO", True)
+        if version == 2:
+            log(f"Loading vit model: {model_name} Version: {self.version}", "INFO", True)
             model.head = GatedHead(min(model.head.weight.shape), 9083)
             safetensors.torch.load_model(
                 model=model, filename=model_path, device=self.device)
-        else:
-            log(f"Invalid model version: {self.version}", "ERROR", True)
-            raise ValueError(f"Invalid model version: {self.version}")
+        
         model.eval()
         model.to(self.device)
         if self.device.type == 'cuda' and torch.cuda.get_device_capability()[0] >= 7:
@@ -151,6 +147,7 @@ class JtpInference:
     def _load_tags(self, tags_path: str) -> List[str]:
         with open(tags_path, "r") as file:
             tags = json.load(file)
+        
         return [tag.replace("_", " ") for tag in tags.keys()]
 
     def _create_tags(self, tag_score: Dict[str, float], threshold: float) -> Tuple[str, Dict[str, float]]:
@@ -164,10 +161,12 @@ class JtpInference:
         if self.device.type == 'cuda' and torch.cuda.get_device_capability()[0] >= 7:
             tensor = tensor.to(dtype=torch.float16,
                                memory_format=torch.channels_last)
+        
         with torch.no_grad():
             logits = self.model(tensor)
             probits = torch.nn.functional.sigmoid(logits[0]).cpu()
             values, indices = probits.topk(250)
+        
         tag_score = {self.allowed_tags[indices[i]]: values[i].item(
         ) for i in range(indices.size(0))}
         sorted_tag_score = dict(
