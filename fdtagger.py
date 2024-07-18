@@ -9,7 +9,7 @@ from aiohttp import web
 from typing import List, Union, Tuple, Dict, Any
 import folder_paths
 from .comfynode import get_ext_dir, get_comfy_dir, download_to_file, update_node_status, wait_for_async, get_extension_config, log
-from inference import JtpInference
+from .inference import JtpInference
 
 config = get_extension_config()
 defaults: Dict[str, Any] = {
