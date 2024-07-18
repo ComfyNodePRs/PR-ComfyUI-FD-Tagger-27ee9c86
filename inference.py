@@ -104,22 +104,23 @@ class JtpInference:
     def __init__(self, model_path: str, tags_path: str, device: Union[torch.device, None] = None, version: int = 1) -> None:
         torch.set_grad_enabled(False)
         self.device = device if device is not None else torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.model = self._load_model(model_path, version)
+        self.version = version
+        self.model = self._load_model(model_path)
         self.transform = self._get_transform()
         self.allowed_tags = self._load_tags(tags_path)
 
-    def _load_model(self, model_path: str, version: int) -> torch.nn.Module:
+    def _load_model(self, model_path: str) -> torch.nn.Module:
         model_name = model_path.split(os.sep)[-1].split(".")[0]
         model = timm.create_model("vit_so400m_patch14_siglip_384.webli", pretrained=False, num_classes=9083)
-        if f"{version}" == "1":
-            log(f"Loading vit model: {model_name} (Version: {version})", "INFO", True)
+        if f"{self.version}" == "1":
+            log(f"Loading vit model: {model_name} (Version: {self.version})", "INFO", True)
             safetensors.torch.load_model(model=model, filename=model_path)
-        elif f"{version}" == "2":
-            log(f"Loading vit model: {model_name} (Version: {version})", "INFO", True)
+        elif f"{self.version}" == "2":
+            log(f"Loading vit model: {model_name} (Version: {self.version})", "INFO", True)
             model.head = GatedHead(min(model.head.weight.shape), 9083)
             safetensors.torch.load_model(model=model, filename=model_path)
         else:
-            raise ValueError(f"Invalid model version: {version}")
+            raise ValueError(f"Invalid model version: {self.version}")
         
         if torch.cuda.is_available() is True and self.device.type == "cuda":
             if torch.cuda.get_device_capability()[0] >= 7:
@@ -152,9 +153,15 @@ class JtpInference:
                 tensor = tensor.to(dtype=torch.float16, memory_format=torch.channels_last)
         
         with torch.no_grad():
-            logits = self.model(tensor)
-            probits = torch.nn.functional.sigmoid(logits[0]).cpu()
-            values, indices = probits.topk(250)
+            if f"{self.version}" == "1":
+                logits = self.model(tensor)
+                probits = torch.nn.functional.sigmoid(logits[0]).cpu()
+                values, indices = probits.topk(250)
+            elif f"{self.version}" == "2":
+                probits = self.model(tensor)[0].cpu()
+                values, indices = probits.topk(250)
+            else:
+                raise ValueError(f"Invalid model version: {self.version}")
         
         corrected_excuded_tags = [tag.replace("_", " ").lstrip().rstrip() for tag in exclude_tags.split(",") if tag.isspace() is False]
         tag_score = {self.allowed_tags[indices[i]]: values[i].item() for i in range(indices.size(0)) if self.allowed_tags[indices[i]] not in corrected_excuded_tags}

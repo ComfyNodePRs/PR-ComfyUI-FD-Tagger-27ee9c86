@@ -98,7 +98,3 @@ Quick interrogation of images is also available on any node that is displaying a
 Simply right click on the node (or if displaying multiple images, on the image you want to interrogate) and select `FDTagger` from the menu.
 
 Default settings used for this are in the `settings` section of `config.json`.
-
-## Changelog
-- 2024-07-18 - Move to own repo/branch, fork for Furry Diffusion community
-- 2024-07-19 - Release 1.0.1, listing on ComfyUI registry
