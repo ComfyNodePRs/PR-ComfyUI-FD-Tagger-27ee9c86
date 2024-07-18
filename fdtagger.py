@@ -64,9 +64,12 @@ async def download_model(model: str, client_id: Union[str, None], node: Union[st
         hf_endpoint = f"https://{hf_endpoint}"
     if hf_endpoint.endswith("/"):
         hf_endpoint = hf_endpoint.rstrip("/")
-
+        
     url: str = config["models"][model]["url"]
     url = url.replace("{HF_ENDPOINT}", hf_endpoint)
+    if not url.endswith("/"):
+        url += "/"
+    log(f"Downloading model {model} from {url}", "INFO", True)
     async with aiohttp.ClientSession(loop=asyncio.get_event_loop()) as session:
         async def update_callback(perc: int) -> None:
             nonlocal client_id

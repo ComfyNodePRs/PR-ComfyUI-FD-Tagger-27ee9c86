@@ -42,6 +42,15 @@ class Fit(torch.nn.Module):
         rpad = wpad - lpad
         return TF.pad(img, (lpad, tpad, rpad, bpad), self.pad)
 
+    def __repr__(self) -> str:
+        return (
+            f"{self.__class__.__name__}(" +
+            f"bounds={self.bounds}, " +
+            f"interpolation={self.interpolation.value}, " +
+            f"grow={self.grow}, " +
+            f"pad={self.pad})"
+        )
+
 
 class CompositeAlpha(torch.nn.Module):
     def __init__(self, background: Union[Tuple[float, float, float], float]) -> None:
@@ -64,6 +73,30 @@ class CompositeAlpha(torch.nn.Module):
         img[..., :3, :, :] += (1.0 - alpha) * background
         return img[..., :3, :, :]
 
+    def __repr__(self) -> str:
+        return (
+            f"{self.__class__.__name__}(" +
+            f"background={self.background})"
+        )
+
+
+class GatedHead(torch.nn.Module):
+    def __init__(self,
+        num_features: int,
+        num_classes: int
+    ):
+        super().__init__()
+        self.num_classes = num_classes
+        self.linear = torch.nn.Linear(num_features, num_classes * 2)
+
+        self.act = torch.nn.Sigmoid()
+        self.gate = torch.nn.Sigmoid()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.linear(x)
+        x = self.act(x[:, :self.num_classes]) * self.gate(x[:, self.num_classes:])
+        return x
+
 
 class JtpInference:
     def __init__(self, model_path: str, tags_path: str, device: Union[torch.device, None] = None, version: int = 1) -> None:
@@ -76,21 +109,22 @@ class JtpInference:
         self.allowed_tags = self._load_tags(tags_path)
 
     def _load_model(self, model_path: str) -> torch.nn.Module:
-        model_name = str.lower(model_path.split(
-            os.sep)[-1].split(".")[0].replace('_', '-'))
+        model_name = model_path.split(os.sep)[-1].split(".")[0]
         model = timm.create_model(
-            model_name, pretrained=False, num_classes=9083)
-        model.head = torch.nn.Sequential(
-            torch.nn.Linear(model.head.in_features,
-                            model.head.out_features * 2),
-            torch.nn.Sigmoid(),
-            torch.nn.Linear(model.head.out_features * 2, 9083)
-        )
+            "vit_so400m_patch14_siglip_384.webli", pretrained=False, num_classes=9083)
         if self.version == 1:
-            safetensors.torch.load_model(model=model, filename=model_path, device=self.device)
-        elif self.version == 2:
+            model.head = torch.nn.Sequential(
+                torch.nn.Linear(model.head.in_features,
+                                model.head.out_features * 2),
+                torch.nn.Sigmoid(),
+                torch.nn.Linear(model.head.out_features * 2, 9083)
+            )
             model.load_state_dict(torch.load(
-                model_path, map_location=self.device))
+                filename=model_path, map_location=self.device))
+        if self.version == 2:
+            model.head = GatedHead(min(model.head.weight.shape), 9083)
+            safetensors.torch.load_model(
+                model=model, filename=model_path, device=self.device)
         else:
             raise ValueError(f"Invalid model version: {self.version}")
         model.eval()
