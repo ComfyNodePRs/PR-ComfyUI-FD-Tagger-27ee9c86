@@ -4,3 +4,6 @@ aiohttp
 torch
 torchvision
 numpy
+tqdm
+msgspec
+colorama
