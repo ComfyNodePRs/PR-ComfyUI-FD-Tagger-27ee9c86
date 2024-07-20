@@ -8,10 +8,10 @@ import torch
 import timm
 import safetensors.torch
 
-from helpers.http import ComfyHTTP
-from helpers.config import ComfyExtensionConfig
-from helpers.logger import ComfyLogger
-from helpers.metaclasses import Singleton
+from ..helpers.http import ComfyHTTP
+from ..helpers.config import ComfyExtensionConfig
+from ..helpers.logger import ComfyLogger
+from ..helpers.metaclasses import Singleton
 
 
 class V2GatedHead(torch.nn.Module):
@@ -46,7 +46,7 @@ class JtpModelManager(metaclass=Singleton):
             if self.is_loaded(model_name):
                 _ = self.download(model_name)
         self.data.clear()
-        del self.data()
+        del self.data
         gc.collect()
     
     @classmethod

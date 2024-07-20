@@ -32,12 +32,12 @@ class ComfyLogger(metaclass=Singleton):
         self.logger.setLevel(self.log_level())
         self.logger.addHandler(logging.StreamHandler())
         self.logger.handlers[0].setFormatter(CustomFormatter())
-        self.logger.propagate = True
+        self.logger.propagate = False
         colorama_init(autoreset=True, strip=False, convert=True, wrap=True)
     
     @classmethod
     def log(cls, message: str, type: Optional[str] = None, always: bool = False) -> None:
-        if not always and not cls.instance.is_logging_enabled():
+        if not always or not cls().is_logging_enabled():
             return
         if type is not None:
             type_match = {
@@ -58,6 +58,7 @@ class ComfyLogger(metaclass=Singleton):
         config = ComfyExtensionConfig().get()
         if "loglevel" not in config:
             return logging.INFO
+        return getattr(logging, config["loglevel"].upper())
     
     @classmethod
     def is_logging_enabled(cls) -> bool:

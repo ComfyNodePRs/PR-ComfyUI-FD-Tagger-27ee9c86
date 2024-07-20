@@ -86,21 +86,21 @@ class ComfyExtension(metaclass=Singleton):
         if linked or os.path.exists(dst_dir):
             if linked:
                 if should_install:
-                    ComfyLogger().log("JS already linked, PromptServer will serve extension", level='INFO')
+                    ComfyLogger().log("JS already linked, PromptServer will serve extension", type='INFO')
                 else:
                     os.unlink(dst_dir)
-                    ComfyLogger().log("JS unlinked, PromptServer will serve extension", level='INFO')
+                    ComfyLogger().log("JS unlinked, PromptServer will serve extension", type='INFO')
             elif not should_install:
                 shutil.rmtree(dst_dir)
-                ComfyLogger().log("JS deleted, PromptServer will serve extension", level='INFO')
+                ComfyLogger().log("JS deleted, PromptServer will serve extension", type='INFO')
             return
         if not should_install:
-            ComfyLogger().log("JS skipped, PromptServer will serve extension", level='WARNING')
+            ComfyLogger().log("JS skipped, PromptServer will serve extension", type='WARNING')
             return
         if ComfyFiles().link_item(src_dir, dst_dir):
-            ComfyLogger().log("JS linked, extension will be served by JavaScript", level='INFO')
+            ComfyLogger().log("JS linked, extension will be served by JavaScript", type='INFO')
             return
-        ComfyLogger().log("Installing JS files", level='INFO')
+        ComfyLogger().log("Installing JS files", type='INFO')
         shutil.copytree(src_dir, dst_dir, dirs_exist_ok=True)
 
     @classmethod

@@ -6,10 +6,10 @@ from aiohttp import web
 import aiohttp
 import msgspec
 
-from helpers.http import ComfyHTTP
-from helpers.config import ComfyExtensionConfig
-from helpers.logger import ComfyLogger
-from helpers.metaclasses import Singleton
+from ..helpers.http import ComfyHTTP
+from ..helpers.config import ComfyExtensionConfig
+from ..helpers.logger import ComfyLogger
+from ..helpers.metaclasses import Singleton
 
 
 class JtpTagManager(metaclass=Singleton):
@@ -27,7 +27,7 @@ class JtpTagManager(metaclass=Singleton):
             if self.is_loaded(tags_name):
                 _ = self.download(tags_name)
         self.data.clear()
-        del self.data()
+        del self.data
         gc.collect()
     
     @classmethod

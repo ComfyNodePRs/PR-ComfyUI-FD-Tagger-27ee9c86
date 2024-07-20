@@ -40,7 +40,10 @@ class ComfyFiles(metaclass=Singleton):
         """
         from .logger import ComfyLogger
         try:
-            return bool(os.readlink(path))
+            if os.path.islink(path):
+                return True
+            else:
+                return False
         except Exception as e:
             ComfyLogger().log(f"Failed to read link from {path}\nException: {e}", type="ERROR", always=True)
             return False

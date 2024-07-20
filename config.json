@@ -1,6 +1,7 @@
 {
 	"name": "FDTagger",
-	"logging": false,
+	"logging": true,
+	"loglevel": "debug",
 	"settings": {
 		"model": "JTP_PILOT2-e3-vit_so400m_patch14_siglip_384",
 		"threshold": 0.35,

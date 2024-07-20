@@ -24,8 +24,6 @@ defaults.update(config.get("settings", {}))
 from ..helpers.extension import ComfyExtension
 from ..redrocket.tag_manager import JtpTagManager
 from ..redrocket.model_manager import JtpModelManager
-JtpModelManager().model_basepath = ComfyExtension().extension_dir("models", mkdir=True)
-JtpTagManager().tags_basepath = ComfyExtension().extension_dir("tags", mkdir=True)
 
 async def classify_tags(image: np.ndarray, model_name: str, threshold: float = 0.35, exclude_tags: str = "", replace_underscore: bool = True, trailing_comma: bool = False, client_id: Union[str, None] = None, node: Union[str, None] = None) -> str:
     from redrocket.classifier import JtpInference
@@ -50,6 +48,8 @@ async def download_complete_callback(node: Union[str, None]) -> None:
     client_id = PromptServer.instance.client_id
     ComfyNode().update_node_status(client_id, node, None)
 
+JtpModelManager(model_basepath=ComfyExtension().extension_dir("models", mkdir=True), download_progress_callback=download_progress_callback, download_complete_callback=download_complete_callback)
+JtpTagManager(tags_basepath=ComfyExtension().extension_dir("tags", mkdir=True), download_progress_callback=download_progress_callback, download_complete_callback=download_complete_callback)
 
 @PromptServer.instance.routes.get("/furrydiffusion/fdtagger/tag")
 async def get_tags(request: web.Request) -> web.Response:
