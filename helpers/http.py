@@ -1,4 +1,4 @@
-from typing import Optional, Callable
+from typing import Any, Optional, Callable, Tuple
 from aiohttp import ClientSession
 from tqdm import tqdm
 import asyncio
@@ -14,7 +14,7 @@ class ComfyHTTP(metaclass=Singleton):
 		pass
 
 	@classmethod
-	async def download_to_file(cls, url: str, destination: str, update_callback: Optional[Callable[[int], None]], is_ext_subpath: bool = True, session: Optional[ClientSession] = None) -> None:
+	async def download_to_file(cls, url: str, destination: str, update_callback: Optional[Callable[..., Any]], is_ext_subpath: bool = True, session: Optional[ClientSession] = None) -> None:
 		from .extension import ComfyExtension
 		close_session = False
 		if session is None:
@@ -45,7 +45,7 @@ class ComfyHTTP(metaclass=Singleton):
 								perc = round(progressbar.n / progressbar.total, 2)
 								if perc != last:
 									last = perc
-									await update_callback(perc)
+									await update_callback(perc, destination)
 		finally:
 			if close_session and session is not None:
 				await session.close()

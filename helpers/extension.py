@@ -1,8 +1,9 @@
 import os
 import shutil
 import inspect
-from typing import List, Optional
-from server import PromptServer
+from typing import List, Optional, Union
+
+from ....server import PromptServer
 
 from .metaclasses import Singleton
 
@@ -64,11 +65,23 @@ class ComfyExtension(metaclass=Singleton):
         return dir
     
     @classmethod
-    def client_id(cls) -> str:
+    def client_id(cls) -> Union[str, None]:
         """
         Get the client id of the extension
         """
-        return 
+        return PromptServer.instance.client_id 
+
+    @classmethod
+    def api_endpoint(cls) -> Union[str, None]:
+        """
+        Get the PromptServer api endpoint of the extension
+        """
+        from .config import ComfyExtensionConfig
+        config = ComfyExtensionConfig().get()
+        if "api_endpoint" not in config:
+            return None
+        else:
+            return config["api_endpoint"]
 
     @classmethod
     def install_js(cls) -> None:

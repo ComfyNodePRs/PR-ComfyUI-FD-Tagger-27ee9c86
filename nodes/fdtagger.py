@@ -1,3 +1,4 @@
+import enum
 import torch
 import numpy as np
 import os
@@ -5,51 +6,67 @@ from PIL import Image
 from aiohttp import web
 from typing import List, Union, Tuple, Dict, Any
 
-import comfy.utils
-from server import PromptServer
-
+from ....comfy import utils
+from ....server import PromptServer
 
 from ..helpers.config import ComfyExtensionConfig
-config = ComfyExtensionConfig().get()
-defaults: Dict[str, Any] = {
-    "model": "JTP_PILOT-e4-vit_so400m_patch14_siglip_384",
-    "threshold": 0.35,
-    "replace_underscore": False,
-    "trailing_comma": False,
-    "exclude_tags": "",
-    "huggingface_endpoint": "https://huggingface.co",
-}
-defaults.update(config.get("settings", {}))
-
 from ..helpers.extension import ComfyExtension
 from ..redrocket.tag_manager import JtpTagManager
 from ..redrocket.model_manager import JtpModelManager
 
-async def classify_tags(image: np.ndarray, model_name: str, threshold: float = 0.35, exclude_tags: str = "", replace_underscore: bool = True, trailing_comma: bool = False, client_id: Union[str, None] = None, node: Union[str, None] = None) -> str:
-    from redrocket.classifier import JtpInference
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    version: int = config["models"][model_name]["version"]
-    tag_string, _ = JtpInference(device=device).run_classifier(model_name=model_name, version=version, image=image, threshold=threshold, exclude_tags=exclude_tags, replace_underscore=replace_underscore, trailing_comma=trailing_comma)
-    return tag_string
+class ModelDevice(enum):
+    CPU = "cpu"
+    GPU = "cuda"
 
-async def download_progress_callback(perc: int, model_name: str, node: Union[str, None]) -> None:
+    def cast_to_device(self) -> torch.device:
+        return torch.device(self.value)
+
+    def __all__(self) -> List[str]:
+        return [self.CPU, self.GPU]
+
+
+async def classify_tags(image: np.ndarray, model_name: str, device: torch.device, steps: float = 0.35, threshold: float = 0.35, exclude_tags: str = "", replace_underscore: bool = True, trailing_comma: bool = False) -> Tuple[str, Dict[str, float]]:
+    """
+    Classify e621 tags for an image using RedRocket JTP Vision Transformer model
+    """
+    from redrocket.classifier import JtpInference
+    version: int = ComfyExtensionConfig().get()["models"][model_name]["version"]
+    tag_string, tag_scores = JtpInference(device=device).run_classifier(model_name=model_name, device=device, version=version, image=image, steps=steps, threshold=threshold, exclude_tags=exclude_tags, replace_underscore=replace_underscore, trailing_comma=trailing_comma)
+    return tag_string, tag_scores
+
+
+async def download_progress_callback(perc: int, file_name: str, client_id: Union[str, None], node: Union[str, None], api_endpoint: Union[str, None]) -> None:
+    """
+    Callback function for download progress updates
+    """
     from ..helpers.nodes import ComfyNode
-    client_id = PromptServer.instance.client_id
+    if client_id is None:
+        client_id = ComfyExtension().client_id()
+    if client_id is None:
+        raise ValueError("Client ID is not set")
+    if api_endpoint is None:
+        api_endpoint = ComfyExtension().api_endpoint()
+    if api_endpoint is None:
+        raise ValueError("API endpoint is not set")
     message: str = ""
     if perc < 100:
-        message = "[{0:d1}%] Downloading {1}...".format(perc, model_name)
+        message = "[{0:d1}%] Downloading {1}...".format(perc, file_name)
     else:
-        message = "Download {0} complete!".format(model_name)
-    ComfyNode().update_node_status(client_id=client_id, node=node, text=message, progress=perc)
+        message = "Download {0} complete!".format(file_name)
+    ComfyNode().update_node_status(client_id=client_id, node=node, api_endpoint=api_endpoint, text=message, progress=perc)
 
 
-async def download_complete_callback(node: Union[str, None]) -> None:
+async def download_complete_callback(file_name: str, client_id: Union[str, None], node: Union[str, None], api_endpoint: Union[str, None]) -> None:
+    """
+    Callback function for download completion updates
+    """
     from ..helpers.nodes import ComfyNode
-    client_id = PromptServer.instance.client_id
-    ComfyNode().update_node_status(client_id, node, None)
+    if client_id is None:
+        client_id = ComfyExtension().client_id()
+    if client_id is None:
+        raise ValueError("Client ID is not set")
+    ComfyNode().update_node_status(client_id=client_id, node=node, api_endpoint=api_endpoint)
 
-JtpModelManager(model_basepath=ComfyExtension().extension_dir("models", mkdir=True), download_progress_callback=download_progress_callback, download_complete_callback=download_complete_callback)
-JtpTagManager(tags_basepath=ComfyExtension().extension_dir("tags", mkdir=True), download_progress_callback=download_progress_callback, download_complete_callback=download_complete_callback)
 
 @PromptServer.instance.routes.get("/furrydiffusion/fdtagger/tag")
 async def get_tags(request: web.Request) -> web.Response:
@@ -67,29 +84,32 @@ async def get_tags(request: web.Request) -> web.Response:
         return web.Response(status=404)
     image: np.ndarray = np.array(Image.open(image_path).convert("RGBA"))
     models: List[str] = JtpModelManager().list_installed()
-    default: str = defaults["model"] + ".safetensors"
+    default: str = ComfyExtensionConfig().get()["settings"]["model"]
     model: str = default if default in models else models[0]
-    threshold: float = float(request.query.get("threshold", defaults["threshold"]))
-    exclude_tags: str = request.query.get("exclude_tags", defaults["exclude_tags"])
-    replace_underscore: bool = request.query.get("replace_underscore", defaults["replace_underscore"]) == "true"
-    trailing_comma: bool = request.query.get("trailing_comma", defaults["trailing_comma"]) == "true"
-    client_id: str = request.rel_url.query.get("clientId", "")
-    node: str = request.rel_url.query.get("node", "")
-    return web.json_response(await classify_tags(image=image, model_name=model, threshold=threshold, exclude_tags=exclude_tags, replace_underscore=replace_underscore, trailing_comma=trailing_comma, client_id=client_id, node=node))
+    steps: int = int(request.query.get("steps", ComfyExtensionConfig().get()["settings"]["steps"]))
+    threshold: float = float(request.query.get("threshold", ComfyExtensionConfig().get()["settings"]["threshold"]))
+    exclude_tags: str = request.query.get("exclude_tags", ComfyExtensionConfig().get()["settings"]["exclude_tags"])
+    replace_underscore: bool = request.query.get("replace_underscore", ComfyExtensionConfig().get()["settings"]["replace_underscore"]) == "true"
+    trailing_comma: bool = request.query.get("trailing_comma", ComfyExtensionConfig().get()["settings"]["trailing_comma"]) == "true"
+    device: ModelDevice = ModelDevice(request.query.get("device", "cpu"))
+    client_id: str = request.rel_url.query.get("clientId", None)
+    node: str = request.rel_url.query.get("node", None)
+    return web.json_response(await classify_tags(image=image, model_name=model, steps=steps, threshold=threshold, exclude_tags=exclude_tags, replace_underscore=replace_underscore, trailing_comma=trailing_comma, client_id=client_id, node=node))
 
 
 class FDTagger():
     @classmethod
     def INPUT_TYPES(cls) -> Dict[str, Any]:
-        models: List[str] = ComfyExtensionConfig().get()["models"].keys()
+        models: List[str] = [o["name"] for o in ComfyExtensionConfig().get()["models"].keys()]
         return {"required": {
             "image": ("IMAGE", ),
-            "model": (models, {"default": defaults["model"]}),
-            "steps": ("INTEGER", {"default": 255, "min": 1, "max": 500}),
-            "threshold": ("FLOAT", {"default": defaults["threshold"], "min": 0.0, "max": 1, "step": 0.05}),
-            "replace_underscore": ("BOOLEAN", {"default": defaults["replace_underscore"]}),
-            "trailing_comma": ("BOOLEAN", {"default": defaults["trailing_comma"]}),
-            "exclude_tags": ("STRING", {"default": defaults["exclude_tags"]}),
+            "model": (models, {"default": ComfyExtensionConfig().get()["settings"]["model"]}),
+            "steps": ("INTEGER", {"default": ComfyExtensionConfig().get()["settings"]["steps"], "min": 1, "max": 500}),
+            "threshold": ("FLOAT", {"default": ComfyExtensionConfig().get()["settings"]["threshold"], "min": 0.0, "max": 1, "step": 0.05}),
+            "replace_underscore": ("BOOLEAN", {"default": ComfyExtensionConfig().get()["replace_underscore"]}),
+            "trailing_comma": ("BOOLEAN", {"default": ComfyExtensionConfig().get()["settings"]["trailing_comma"]}),
+            "exclude_tags": ("STRING", {"default": ComfyExtensionConfig().get()["settings"]["exclude_tags"]}),
+            "device": ("STRING", {"default": "cpu", "options": ["cpu", "cuda"]})
         }}
 
     RETURN_TYPES: Tuple[str] = ("STRING",)
@@ -101,7 +121,7 @@ class FDTagger():
     def tag(self, image: np.ndarray, model: str, steps: int, threshold: float, exclude_tags: str = "", replace_underscore: bool = False, trailing_comma: bool = False) -> Dict[str, Any]:
         from ..helpers.multithreading import ComfyThreading
         tensor = np.array(image * steps, dtype=np.uint8)
-        pbar = comfy.utils.ProgressBar(tensor.shape[0])
+        pbar = utils.ProgressBar(tensor.shape[0])
         tags: List[str] = []
         for i in range(tensor.shape[0]):
             tags.append(ComfyThreading().wait_for_async(lambda: classify_tags(image=tensor[i], model_name=model, threshold=threshold,
@@ -109,6 +129,8 @@ class FDTagger():
             pbar.update(1)
         return {"ui": {"tags": tags}, "result": (tags,)}
 
+JtpModelManager(model_basepath=ComfyExtension().extension_dir("models", mkdir=True), download_progress_callback=download_progress_callback, download_complete_callback=download_complete_callback)
+JtpTagManager(tags_basepath=ComfyExtension().extension_dir("tags", mkdir=True), download_progress_callback=download_progress_callback, download_complete_callback=download_complete_callback)
 
 NODE_CLASS_MAPPINGS: Dict[str, Any] = {
     "FD_FDTagger|fdtagger": FDTagger,

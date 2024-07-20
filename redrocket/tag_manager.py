@@ -1,14 +1,12 @@
 import asyncio
 import gc
 import os
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple, Union
 from aiohttp import web
 import aiohttp
 import msgspec
+import torch
 
-from ..helpers.http import ComfyHTTP
-from ..helpers.config import ComfyExtensionConfig
-from ..helpers.logger import ComfyLogger
 from ..helpers.metaclasses import Singleton
 
 
@@ -32,10 +30,18 @@ class JtpTagManager(metaclass=Singleton):
     
     @classmethod
     def is_loaded(cls, tags_name: str) -> bool:
+        """
+        Check if tags are loaded into memory
+        """
         return tags_name in cls().data.keys() and cls().data[tags_name]["tags"] is not None
     
     @classmethod
     def load(cls, tags_name: str) -> bool:
+        """
+        Mount the tags for a model into memory
+        """
+        from ..helpers.logger import ComfyLogger
+        
         tags_path = os.path.join(cls().tags_basepath, f"{tags_name}.json")
         if cls().is_loaded(tags_name):
             ComfyLogger().log(f"Tags for model {tags_name} already loaded", "WARNING", True)
@@ -50,6 +56,11 @@ class JtpTagManager(metaclass=Singleton):
     
     @classmethod
     def unload(cls, tags_name: str) -> bool:
+        """
+        Unmount the tags for a model from memory
+        """
+        from ..helpers.logger import ComfyLogger
+        
         if not cls().is_loaded(tags_name):
             ComfyLogger().log(f"Tags for model {tags_name} not loaded, nothing to do here", "WARNING", True)
             return True
@@ -70,6 +81,8 @@ class JtpTagManager(metaclass=Singleton):
         """
         Get a list of installed tags files in a directory
         """
+        from ..helpers.logger import ComfyLogger
+        
         tags_path = os.path.abspath(cls().tags_basepath)
         if not os.path.exists(tags_path):
             ComfyLogger().log(f"Tags path {tags_path} does not exist, it is being created", "WARN", True)
@@ -81,6 +94,13 @@ class JtpTagManager(metaclass=Singleton):
     
     @classmethod
     async def download(cls, tags_name: str) -> web.Response:
+        """
+        Load tags for a model from a URL and save them to a file.
+        """
+        from ..helpers.http import ComfyHTTP
+        from ..helpers.config import ComfyExtensionConfig
+        from ..helpers.logger import ComfyLogger
+        
         config = ComfyExtensionConfig().get()
         hf_endpoint: str = config["huggingface_endpoint"]
         if not hf_endpoint.startswith("https://"):
@@ -104,3 +124,16 @@ class JtpTagManager(metaclass=Singleton):
                 raise
             cls().download_complete_callback(tags_name)
         return web.Response(status=200)
+
+    @classmethod
+    def process_tags(cls, model_name: str, indices: Union[torch.Tensor, None], values: Union[torch.Tensor, None], exclude_tags: str, replace_underscore: bool, threshold: float, trailing_comma: bool) -> Tuple[str, Dict[str, float]]:
+        """
+        Process the tags for a model based on the indices and values from the model output
+        """
+        corrected_excluded_tags = [tag.replace("_", " ").strip() for tag in exclude_tags.split(",") if not tag.isspace()]
+        tag_score = {cls().data[model_name]["tags"][indices[i]]: values[i].item() for i in range(indices.size(0)) if cls().data[model_name]["tags"][indices[i]] not in corrected_excluded_tags}
+        if not replace_underscore:
+            tag_score = {key.replace(" ", "_"): value for key, value in tag_score.items()}
+        tag_score = dict(sorted(tag_score.items(), key=lambda item: item[1], reverse=True))
+        tag_score = {key: value for key, value in tag_score.items() if value > threshold}
+        return ", ".join(tag_score.keys()) + ("," if trailing_comma else ""), tag_score

@@ -33,7 +33,7 @@ class V2GatedHead(torch.nn.Module):
 
 class JtpModelManager(metaclass=Singleton):
     """
-    The JTP Model Manager class is a singleton class that manages the loading, unloading, downloading, and installation of JTP Vision Transformer models.
+    The RedRocket JTP Model Manager class is a singleton class that manages the loading, unloading, downloading, and installation of JTP Vision Transformer models.
     """
     def __init__(self, model_basepath: str, download_progress_callback: Callable[[int, int], None], download_complete_callback: Optional[Callable[[str], None]] = None) -> None:
         self.model_basepath = model_basepath
@@ -51,10 +51,16 @@ class JtpModelManager(metaclass=Singleton):
     
     @classmethod
     def is_loaded(cls, model_name: str) -> bool:
+        """
+        Check if a RedRocket JTP Vision Transformer model is loaded into memory
+        """
         return model_name in cls().data.keys() and cls().data[model_name]["model"] is not None
     
     @classmethod
     def load(cls, model_name: str, version: int = 1, device: torch.device = torch.cpu) -> bool:
+        """
+        Load a RedRocket JTP Vision Transformer model into memory
+        """
         model_path = os.path.join(cls().model_basepath, f"{model_name}.safetensors")
         if cls().is_loaded(model_name):
             ComfyLogger().log(f"Model {model_name} already loaded", "WARNING", True)
@@ -74,9 +80,38 @@ class JtpModelManager(metaclass=Singleton):
         cls().data[model_name]["model"].eval()
         ComfyLogger().log(f"Model {model_name} loaded successfully", "INFO", True)
         return True
+
+    @classmethod
+    def switch_device(cls, model_name: str, device: torch.device) -> bool:
+        """
+        Switch the device of a RedRocket JTP Vision Transformer model
+        """
+        if not cls().is_loaded(model_name):
+            ComfyLogger().log(f"Model {model_name} not loaded, nothing to do here", "WARNING", True)
+            return False
+        if device.type == "cuda" and torch.cuda.is_available() is False:
+            ComfyLogger().log("CUDA is not available, cannot switch to GPU", "ERROR", True)
+            return False
+        
+        if device.type == "cuda" and torch.cuda.get_device_capability()[0] >= 7:
+            cls().data[model_name]["model"].cuda()
+            cls().data[model_name]["model"] = cls().data[model_name]["model"].to(dtype=torch.float16, memory_format=torch.channels_last)
+            ComfyLogger().log("Switched to GPU with mixed precision", "INFO", True)
+        elif device.type == "cuda" and torch.cuda.get_device_capability()[0] < 7:
+            cls().data[model_name]["model"].cuda()
+            cls().data[model_name]["model"].to(device)
+            ComfyLogger().log("Switched to GPU without mixed precision", "WARNING", True)
+        else:
+            cls().data[model_name]["model"].cpu()
+            cls().data[model_name]["model"].to(device)
+            ComfyLogger().log("Switched to CPU", "INFO", True)
+        return True
     
     @classmethod
     def unload(cls, model_name: str) -> bool:
+        """
+        Unload a RedRocket JTP Vision Transformer model from memory
+        """
         if not cls().is_loaded(model_name):
             ComfyLogger().log(f"Model {model_name} not loaded, nothing to do here", "WARNING", True)
             return True
@@ -110,6 +145,9 @@ class JtpModelManager(metaclass=Singleton):
     
     @classmethod
     async def download(cls, model_name: str) -> web.Response:
+        """
+        Download a RedRocket JTP Vision Transformer model from a URL
+        """
         config = ComfyExtensionConfig().get()
         hf_endpoint: str = config["huggingface_endpoint"]
         if not hf_endpoint.startswith("https://"):

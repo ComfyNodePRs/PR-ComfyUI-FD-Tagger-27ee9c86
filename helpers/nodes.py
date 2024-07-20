@@ -3,8 +3,8 @@ import inspect
 import os
 import sys
 from typing import Any, Dict, Optional, Tuple, Union
-from server import PromptServer
 
+from server import PromptServer
 from .metaclasses import Singleton
 
 
@@ -17,42 +17,59 @@ class ComfyNode(metaclass=Singleton):
         pass
 
     @classmethod
-    def update_node_status(cls, client_id: Optional[str], node: str, text: str, progress: Optional[float] = None) -> None:
+    def update_node_status(cls, client_id: Optional[str], node: Union[str, None], api_endpoint: Union[str, None], text: Optional[str] = None, progress: Optional[float] = None) -> None:
+        """
+		Update the status of a node in the Comfy UI
+        """
+        from .extension import ComfyExtension
         if client_id is None:
-            client_id = PromptServer.instance.client_id
+            client_id = ComfyExtension().client_id()
         if client_id is None:
-            return
-        PromptServer.instance.send_sync("furrydiffusion/update_status", {
+            raise ValueError("Client ID is not set")
+        if api_endpoint is None:
+            api_endpoint = ComfyExtension().api_endpoint()
+        if api_endpoint is None:
+            raise ValueError("API endpoint is not set")
+        PromptServer.instance.send_sync(f"{api_endpoint}/update_status", {
             "node": node,
             "progress": progress,
             "text": text
         }, client_id)
 
     @classmethod
-    async def update_node_status_async(cls, client_id: Optional[str], node: str, text: str, progress: Optional[float] = None) -> None:
+    async def update_node_status_async(cls, client_id: Optional[str], node: Union[str, None], api_endpoint: Union[str, None], text: Optional[str] = None, progress: Optional[float] = None) -> None:
+        """
+		Update the status of a node in the Comfy UI asynchronously
+        """
+        from .extension import ComfyExtension
         if client_id is None:
-            client_id = PromptServer.instance.client_id
+            client_id = ComfyExtension().client_id()
         if client_id is None:
-            return
-        await PromptServer.instance.send("furrydiffusion/update_status", {
+            raise ValueError("Client ID is not set")
+        if api_endpoint is None:
+            api_endpoint = ComfyExtension().api_endpoint()
+        if api_endpoint is None:
+            raise ValueError("API endpoint is not set")
+        await PromptServer.instance.send(f"{api_endpoint}/update_status", {
             "node": node,
             "progress": progress,
             "text": text
 		}, client_id)
     
     @classmethod
-    def get_module_vars(cls, module_path):
+    def get_module_vars(cls, module_path: str) -> Tuple[str, Dict[str, Any]]:
+        """
+		Get the declared variables in a module
+        """
         module_dir, module_file = os.path.split(module_path)
         module_name, _ = os.path.splitext(module_file)
         abs_module_dir = os.path.abspath(module_dir)
         sys.path.insert(0, abs_module_dir)
-        
         spec = spec_from_file_location(module_name, module_path)
         module = module_from_spec(spec)
         sys.modules[module_name] = module
         package_parts = module_dir.split(os.sep)
         module.__package__ = '.'.join(package_parts[-2:])
-
         try:
             spec.loader.exec_module(module)
             module_vars = {name: value for name, value in vars(module).items() if not name.startswith('__') and not inspect.ismodule(value) and not inspect.isclass(value) and not inspect.isfunction(value)}
@@ -63,6 +80,9 @@ class ComfyNode(metaclass=Singleton):
 
     @classmethod
     def get_node_vars(cls) -> Dict[str, Any]:
+        """
+        Search for Comfy UI related variables in the source files located in the `nodes` directory of the project, and return the results combined.
+        """
         from .extension import ComfyExtension
         from .logger import ComfyLogger
         source_path = ComfyExtension().extension_dir("nodes", mkdir=False)
