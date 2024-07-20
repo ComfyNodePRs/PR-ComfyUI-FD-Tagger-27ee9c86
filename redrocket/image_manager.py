@@ -1,4 +1,3 @@
-import enum
 import hashlib
 import os
 from pathlib import Path
@@ -7,6 +6,7 @@ from PIL import Image
 from typing import Any, Dict, Tuple, Union
 import numpy
 import torch
+from enum import Enum
 from torchvision.transforms import transforms
 from torchvision.transforms import InterpolationMode
 import torchvision.transforms.functional as TF
@@ -90,7 +90,7 @@ class CompositeAlpha(torch.nn.Module):
         )
 
 
-class ImageCacheType(enum):
+class ImageCacheType(Enum):
 	"""
 	An enumeration of the types of image caches
 	"""

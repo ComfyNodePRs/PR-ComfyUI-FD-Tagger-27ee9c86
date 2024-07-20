@@ -30,7 +30,7 @@ class FDTagger {
 			statusTagHandler: true,
 		};
 
-		api.addEventListener("furrydiffusion/update_status", ({ detail }) => {
+		api.addEventListener("furrydiffusion/fdtagger/update_status", ({ detail }) => {
 			let { node, progress, text } = detail;
 			const n = app.graph.getNodeById(+(node || app.runningNodeId));
 			if (!n) return;
@@ -80,7 +80,7 @@ app.registerExtension({
 	async beforeRegisterNodeDef(nodeType, nodeData, app) {
 		fdtagger.addStatusTagHandler(nodeType);
 
-		if (nodeData.name === "FDTagger|fdtagger") {
+		if (nodeData.name === "FD_Tagger|fdtagger") {
 			const onExecuted = nodeType.prototype.onExecuted;
 			nodeType.prototype.onExecuted = function (message) {
 				const r = onExecuted?.apply?.(this, arguments);

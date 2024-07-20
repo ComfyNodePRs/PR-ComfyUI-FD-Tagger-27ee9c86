@@ -70,13 +70,18 @@ class JtpModelManager(metaclass=Singleton):
             return False
         
         ComfyLogger().log(f"Loading model {model_name} (version: {version} from {model_path}...", "INFO", True)
-        cls().data[model_name]["model"] = timm.create_model("vit_so400m_patch14_siglip_384.webli", pretrained=False, num_classes=9083)
+        cls().data[model_name] = {
+            "model" : timm.create_model("vit_so400m_patch14_siglip_384.webli", pretrained=False, num_classes=9083),
+            "version": version,
+            "device": device
+        }
         if f"{version}" == "2":
             cls().data[model_name]["model"].head = V2GatedHead(min(cls().data[model_name]["model"].head.weight.shape), 9083)
         safetensors.torch.load_model(model=cls().data[model_name]["model"], filename=model_path)
         if torch.cuda.is_available() is True and device.type == "cuda":
             cls().data[model_name]["model"].cuda()
             cls().data[model_name]["model"].to(dtype=torch.float16, memory_format=torch.channels_last)
+        cls().data[model_name]["device"] = device
         cls().data[model_name]["model"].eval()
         ComfyLogger().log(f"Model {model_name} loaded successfully", "INFO", True)
         return True
@@ -92,18 +97,20 @@ class JtpModelManager(metaclass=Singleton):
         if device.type == "cuda" and torch.cuda.is_available() is False:
             ComfyLogger().log("CUDA is not available, cannot switch to GPU", "ERROR", True)
             return False
-        
         if device.type == "cuda" and torch.cuda.get_device_capability()[0] >= 7:
             cls().data[model_name]["model"].cuda()
             cls().data[model_name]["model"] = cls().data[model_name]["model"].to(dtype=torch.float16, memory_format=torch.channels_last)
+            cls().data[model_name]["device"] = device
             ComfyLogger().log("Switched to GPU with mixed precision", "INFO", True)
         elif device.type == "cuda" and torch.cuda.get_device_capability()[0] < 7:
             cls().data[model_name]["model"].cuda()
             cls().data[model_name]["model"].to(device)
+            cls().data[model_name]["device"] = device
             ComfyLogger().log("Switched to GPU without mixed precision", "WARNING", True)
         else:
             cls().data[model_name]["model"].cpu()
             cls().data[model_name]["model"].to(device)
+            cls().data[model_name]["device"] = device
             ComfyLogger().log("Switched to CPU", "INFO", True)
         return True
     
@@ -144,7 +151,7 @@ class JtpModelManager(metaclass=Singleton):
         return models
     
     @classmethod
-    async def download(cls, model_name: str) -> web.Response:
+    async def download(cls, model_name: str) -> bool:
         """
         Download a RedRocket JTP Vision Transformer model from a URL
         """
@@ -157,17 +164,19 @@ class JtpModelManager(metaclass=Singleton):
         
         model_path = os.path.join(cls().model_basepath, f"{model_name}.safetensors")
         
-        url: str = config["models"][model_name]["url"]
+        url: str = ComfyExtensionConfig().get(property=f"models.{model_name}.url")
         url = url.replace("{HF_ENDPOINT}", hf_endpoint)
         if not url.endswith("/"):
             url += "/"
+        if not url.endswith(".safetensors"):
+            url += f"{model_name}.safetensors"
         
         ComfyLogger().log(f"Downloading model {model_name} from {url}", "INFO", True)
         async with aiohttp.ClientSession(loop=asyncio.get_event_loop()) as session:
             try:
-                await ComfyHTTP().download_to_file(f"{url}{model_name}.safetensors", model_path, cls().download_progress_callback, session=session)
+                await ComfyHTTP().download_to_file(url=url, destination=model_path, update_callback=cls().download_progress_callback, session=session)
             except aiohttp.client_exceptions.ClientConnectorError as err:
                 ComfyLogger().log("Unable to download model. Download files manually or try using a HF mirror/proxy in your config.json", "ERROR", True)
-                raise
-            cls().download_complete_callback(model_name)
-        return web.Response(status=200)
+                return False
+            await cls().download_complete_callback(model_name)
+        return True

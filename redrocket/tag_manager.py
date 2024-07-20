@@ -36,7 +36,7 @@ class JtpTagManager(metaclass=Singleton):
         return tags_name in cls().data.keys() and cls().data[tags_name]["tags"] is not None
     
     @classmethod
-    def load(cls, tags_name: str) -> bool:
+    def load(cls, tags_name: str, version: int) -> bool:
         """
         Mount the tags for a model into memory
         """
@@ -50,8 +50,12 @@ class JtpTagManager(metaclass=Singleton):
             ComfyLogger.log(f"Tags for model {tags_name} not found in path: {tags_path}", "ERROR", True)
             return False
         
+        # TODO: Add a check for the version of the tags file differs
         with open(tags_path, "r") as file:
-            cls().data[tags_name]["tags"] = msgspec.json.decode(file.read(), type=Dict[str, float], strict=False)
+            cls().data[tags_name] = {
+                "tags": msgspec.json.decode(file.read(), type=Dict[str, float], strict=False),
+                "version": version
+            }
         return True
     
     @classmethod
@@ -82,7 +86,6 @@ class JtpTagManager(metaclass=Singleton):
         Get a list of installed tags files in a directory
         """
         from ..helpers.logger import ComfyLogger
-        
         tags_path = os.path.abspath(cls().tags_basepath)
         if not os.path.exists(tags_path):
             ComfyLogger().log(f"Tags path {tags_path} does not exist, it is being created", "WARN", True)
@@ -93,7 +96,7 @@ class JtpTagManager(metaclass=Singleton):
         return tags
     
     @classmethod
-    async def download(cls, tags_name: str) -> web.Response:
+    async def download(cls, tags_name: str) -> bool:
         """
         Load tags for a model from a URL and save them to a file.
         """
@@ -107,23 +110,24 @@ class JtpTagManager(metaclass=Singleton):
             hf_endpoint = f"https://{hf_endpoint}"
         if hf_endpoint.endswith("/"):
             hf_endpoint = hf_endpoint.rstrip("/")
-        
         tags_path = os.path.join(cls().tags_basepath, f"{tags_name}.json")
         
-        url: str = config["models"][tags_name]["url"]
+        url: str = ComfyExtensionConfig().get(property=f"tags.{tags_name}.url")
         url = url.replace("{HF_ENDPOINT}", hf_endpoint)
         if not url.endswith("/"):
             url += "/"
+        if not url.endswith(".json"):
+            url += f"tags.json"
         
         ComfyLogger().log(f"Downloading tags {tags_name} from {url}", "INFO", True)
         async with aiohttp.ClientSession(loop=asyncio.get_event_loop()) as session:
             try:
-                await ComfyHTTP().download_to_file(f"{url}{tags_name}.json", tags_path, cls().download_progress_callback, session=session)
+                await ComfyHTTP().download_to_file(f"{url}", tags_path, cls().download_progress_callback, session=session)
             except aiohttp.client_exceptions.ClientConnectorError as err:
                 ComfyLogger().log("Unable to download tags. Download files manually or try using a HF mirror/proxy in your config.json", "ERROR", True)
-                raise
-            cls().download_complete_callback(tags_name)
-        return web.Response(status=200)
+                return False
+            await cls().download_complete_callback(tags_name)
+        return True
 
     @classmethod
     def process_tags(cls, model_name: str, indices: Union[torch.Tensor, None], values: Union[torch.Tensor, None], exclude_tags: str, replace_underscore: bool, threshold: float, trailing_comma: bool) -> Tuple[str, Dict[str, float]]:

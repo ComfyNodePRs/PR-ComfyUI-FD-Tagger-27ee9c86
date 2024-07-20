@@ -19,25 +19,28 @@ class JtpInference(metaclass=Singleton):
         self.device = device if device is not None else torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     @classmethod
-    def run_classifier(cls, model_name: str, version: int, device: torch.device, image: Union[np.ndarray, Path], steps: float, threshold: float, exclude_tags: str = "", replace_underscore: bool = True, trailing_comma: bool = False) -> Tuple[str, Dict[str, float]]:
+    async def run_classifier(cls, model_name: str, tags_name: str, device: torch.device, image: Union[np.ndarray, Path], steps: float, threshold: float, exclude_tags: str = "", replace_underscore: bool = True, trailing_comma: bool = False) -> Tuple[str, Dict[str, float]]:
         from ..helpers.logger import ComfyLogger
+        from ..helpers.config import ComfyExtensionConfig
+        model_version: int = ComfyExtensionConfig().get(property=f"models.{model_name}.version")
+        tags_version: int = ComfyExtensionConfig().get(property=f"tags.{tags_name}.version")
 
         # Load all the things
         if JtpModelManager().is_installed(model_name) is False:
-            if not JtpModelManager().download(model_name):
+            if not await JtpModelManager().download(model_name):
                 ComfyLogger().log(f"Model {model_name} could not be downloaded", "ERROR", True)
                 return "", {}
-        if JtpTagManager().is_installed(model_name) is False:
-            if not JtpTagManager().download(model_name):
-                ComfyLogger().log(f"Tags for model {model_name} could not be downloaded", "ERROR", True)
+        if JtpTagManager().is_installed(tags_name) is False:
+            if not await JtpTagManager().download(tags_name):
+                ComfyLogger().log(f"Tags {tags_name} could not be downloaded", "ERROR", True)
                 return "", {}            
         if JtpModelManager().is_loaded(model_name) is False:
-            if not JtpModelManager().load(model_name, version=version, device=device):
+            if not JtpModelManager().load(model_name=model_name, version=model_version, device=device):
                 ComfyLogger().log(f"Model {model_name} could not be loaded", "ERROR", True)
                 return "", {}
-        if JtpTagManager().is_loaded(model_name) is False:
-            if not JtpTagManager().load(model_name):
-                ComfyLogger().log(f"Tags for model {model_name} could not be loaded", "ERROR", True)
+        if JtpTagManager().is_loaded(tags_name) is False:
+            if not JtpTagManager().load(tags_name=tags_name, version=tags_version):
+                ComfyLogger().log(f"Tags {tags_name} could not be loaded", "ERROR", True)
                 return "", {}
         if cls().device != device:
             JtpModelManager().switch_device(model_name, device)
@@ -52,12 +55,12 @@ class JtpInference(metaclass=Singleton):
         
         # Run inference
         with torch.no_grad():
-            if f"{version}" == "1":
+            if f"{model_version}" == "1":
                 logits = JtpModelManager().data[model_name]["model"](tensor)
                 probits = torch.nn.functional.sigmoid(logits[0]).cpu()
                 values, indices = probits.topk(250)
                 del logits
-            elif f"{version}" == "2":
+            elif f"{model_version}" == "2":
                 probits = JtpModelManager().data[model_name]["model"](tensor)[0].cpu()
                 values, indices = probits.topk(250)
             else:

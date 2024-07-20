@@ -22,12 +22,13 @@ class ComfyNode(metaclass=Singleton):
 		Update the status of a node in the Comfy UI
         """
         from .extension import ComfyExtension
+        from .config import ComfyExtensionConfig
         if client_id is None:
             client_id = ComfyExtension().client_id()
         if client_id is None:
             raise ValueError("Client ID is not set")
         if api_endpoint is None:
-            api_endpoint = ComfyExtension().api_endpoint()
+            api_endpoint = ComfyExtensionConfig().get(property="api_endpoint")
         if api_endpoint is None:
             raise ValueError("API endpoint is not set")
         PromptServer.instance.send_sync(f"{api_endpoint}/update_status", {
