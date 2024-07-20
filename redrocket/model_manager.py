@@ -44,7 +44,7 @@ class JtpModelManager(metaclass=Singleton):
     def __del__(self) -> None:
         for model_name in self.data.keys():
             if self.is_loaded(model_name):
-                _ = self.download(model_name)
+                _ = self.unload(model_name)
         self.data.clear()
         del self.data
         gc.collect()
