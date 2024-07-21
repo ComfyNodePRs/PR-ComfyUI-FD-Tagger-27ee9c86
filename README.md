@@ -54,49 +54,9 @@ Use the [ComfyUI-Manager](https://github.com/ltdrdata/ComfyUI-Manager) extension
     ```
     pip install -r requirements.txt
     ```
-<<<<<<< HEAD
 
 5. You're now free to start your ComfyUI instance as you normally do.
 
-## Adding the node
-
-1.  Add the node via `image` -> `FDTagger`.
-2.  Connect your inputs, adjust your parameters, and connect your outputs.
-3.  Iteratively make changes as you go! 
-
-Models are automatically downloaded at runtime if missing.
-
-The node supports tagging and outputting multiple batched inputs.  It can handle single images, or batched image operation input.
-
-## Connecting the node
-
-### Inputs
-
-| **Input** | **Description** |
-| --- | ----------------------- |
-| ``image[]`` | An image or a batch of images to interrogate |
-
-### Node Parameters
-
-| **Parameter** | **Description** |
-| --- | ----------------------- |
-| ``model`` | The interrogation model to use for e621 tag interrogation |
-| ``threshold`` | The score for the tag to be considered valid |
-| ``exclude_tags`` | A comma separated list of tags that should not be included in the results |
-| ``replace_underscore`` | Set to **true** or check the box to replace underscores in tags with spaces |
-| ``trailing_comma`` | Add a trailing comma to the caption output |
-
-### Outputs
-
-| **Output** | **Description** |
-| --- | ----------------------- |
-| ``tags[]`` | A string array of prompts, in sequential order of image batch (if multiple)
-
-=======
-
-5. You're now free to start your ComfyUI instance as you normally do.
-
->>>>>>> dev
 ## Quick interrogation Feature
 
 Quick interrogation of images is also available on any node that is displaying an image, e.g. a `LoadImage`, `SaveImage`, `PreviewImage` node.  
