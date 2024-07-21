@@ -34,10 +34,10 @@ If you want to read my dribble as I update this code.  Go on.
 - Big refactor of all of the code... exhausting.
 - Modularization of everything, including the ComfyUI extension helpers themselves.
 - Use orjson for speedup on load tags.json.
-- Add model and tag tensor/object caching.
-- Add model and tag loading and unloading for memory efficiency.
+- Add model and tag tensor/object caching with ``ComfyCache`` class.
+- Add model and tag loading and unloading for memory efficiency with ``JtpTagManager``, ``JtpModelManager``, ``JtpImageManager`` classes.
 - Improve this chamgelog format slightly.
-- Add code comments and lint some code manualy with autopep8.
+- Add code comments and lint some code manualy with autopep8.  Not complete.
 - Touched some Grass, whips and chains.
 
 --------------
