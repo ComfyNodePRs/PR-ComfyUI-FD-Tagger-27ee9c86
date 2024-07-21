@@ -138,17 +138,21 @@ class JtpTagManager(metaclass=Singleton):
         await asyncio.sleep(0.1)
         corrected_excluded_tags = [tag.replace("_", " ").strip() for tag in exclude_tags.split(",") if not tag.isspace()]
         tag_score = {}
-        if indices is None or values is None:
-            ComfyLogger().log(f"No tags found for model {tags_name}", "WARNING")
+        if indices is None or indices.size(0) == 0:
+            ComfyLogger().log(message=f"No indicies found for model {tags_name}", type="WARNING", always=True)
             return "", tag_score
-        ComfyLogger().log(f"Processing {len(values)} tags for model {tags_name}", "INFO")
-        tags_data = ComfyCache.get(f'tags.{tags_name}.tags')
+        if values is None or values.size(0) == 0:
+            ComfyLogger().log(message=f"No values found for model {tags_name}", type="WARNING", always=True)
+            return "", tag_score
+        ComfyLogger().log(message=f"Processing {len(indices)}:{len(values)} tags for model {tags_name}", type="INFO", always=True)
+        tags_data: Union[Dict[str, float], None] = ComfyCache.get(f'tags.{tags_name}.tags')
+        if tags_data is None or len(tags_data) == 0:
+            ComfyLogger().log(message=f"Tags data for {tags_name} not found in cache", type="ERROR", always=True)
+            return "", tag_score
         for i in range(indices.size(0)):
-            index = indices[i].item()
-            if index in tags_data:
-                tag = tags_data[index]
-                if tag not in corrected_excluded_tags:
-                    tag_score[tag] = values[i].item()
+            tag = [key for key, value in tags_data.items() if value == indices[i].item()][0]
+            if tag not in corrected_excluded_tags:
+                tag_score[tag] = values[i].item()
         if not replace_underscore:
             tag_score = {key.replace(" ", "_"): value for key, value in tag_score.items()}
         tag_score = dict(sorted(tag_score.items(), key=lambda item: item[1], reverse=True))

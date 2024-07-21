@@ -115,9 +115,9 @@ class JtpImageManager(metaclass=Singleton):
         Check if an image is done processing
         """
         return cls.is_cached(image_name) and ComfyCache.get(f'image.{image_name}.output') is not None
-
+    
     @classmethod
-    def do_transform(cls, image: numpy.ndarray, width: int, height: int, interpolation, grow, pad, background: Tuple[int, int, int]) -> torch.Tensor:
+    def get_transform(cls, width: int, height: int, interpolation, grow, pad, background: Tuple[int, int, int]) -> transforms.Compose:
         """
         Perform transformations on an image
         """
@@ -127,10 +127,10 @@ class JtpImageManager(metaclass=Singleton):
             CompositeAlpha(background=background),
             transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True),
             transforms.CenterCrop(size=(width, height)),
-        ])(image).unsqueeze(0)
+        ])
   
     @classmethod
-    def load(cls, image: Union[Path, numpy.ndarray, None], device: torch.device) -> Union[Tuple[str, Dict[str, Any]], torch.Tensor, None]:
+    async def load(cls, image: Union[Path, numpy.ndarray, Image.Image, None], device: torch.device) -> Union[Tuple[str, Dict[str, Any]], torch.Tensor, None]:
         """
         Load an image into memory
   
@@ -140,7 +140,7 @@ class JtpImageManager(metaclass=Singleton):
         """
         from ..helpers.logger import ComfyLogger
         if image is not None and isinstance(image, Path):
-            # Image is a path to an image, so load it with PIL, then stuff into a numpy array
+            # Image is a path to an image, so load it with PIL
             image = str(image)
             if cls.is_done(image):
                 ComfyLogger().log(f"Image {image} already processed, using from cache", "WARNING", True)
@@ -154,7 +154,7 @@ class JtpImageManager(metaclass=Singleton):
                     ComfyLogger.log(f"Image {image} not found in path: {image}", "ERROR", True)
                     return None
                 ComfyCache.set(f'image.{image}', {
-                    "input": numpy.array(Image.open(image).convert("RGBA"), dtype=numpy.uint8),
+                    "input": Image.open(image).convert("RGBA"),
                     "timestamp": time.time(),
                     "used_timestamp": time.time(),
                     "device": device,
@@ -163,7 +163,7 @@ class JtpImageManager(metaclass=Singleton):
                 ComfyLogger().log(f"Image: {image} loaded into cache", "DEBUG", True)
                 image_input = ComfyCache.get(f'image.{image}.input')
         elif image is not None and isinstance(image, numpy.ndarray):
-            # Image is a numpy array, so sha256 it and look for it in the cache
+            # Image is a numpy array, so convert it to a PIL image
             image_hash = hashlib.sha256(image.tobytes(), usedforsecurity=False).hexdigest()
             if cls.is_done(image_hash):
                 ComfyLogger().log(f"Image {image} already processed, using from cache", "WARNING", True)
@@ -174,7 +174,7 @@ class JtpImageManager(metaclass=Singleton):
                 image_input = ComfyCache.get(f'image.{image_hash}.input')
             else:
                 ComfyCache.set(f'image.{image_hash}', {
-                    "input": image,
+                    "input": Image.fromarray(image).convert("RGBA"),
                     "timestamp": time.time(),
                     "used_timestamp": time.time(),
                     "device": device,
@@ -182,20 +182,40 @@ class JtpImageManager(metaclass=Singleton):
                 })
                 ComfyLogger().log(f"Image {image_hash} loaded into cache", "DEBUG", True)
                 image_input = ComfyCache.get(f'image.{image_hash}.input')
+        elif image is not None and isinstance(image, Image.Image):
+            # Image is a PIL image, we need to sha256 hash it
+            img = numpy.array(image.convert("RGBA"), dtype=numpy.uint8)
+            image_hash = hashlib.sha256(img.tobytes(), usedforsecurity=False).hexdigest()
+            if cls.is_done(image_hash):
+                ComfyLogger().log(f"Image {image} already processed, using from cache", "WARNING", True)
+                return ComfyCache.get(f'image.{image_hash}.output')
+            if cls.is_cached(image_hash):
+                ComfyLogger().log(f"Image {image_hash} already loaded, using from cache", "WARNING", True)
+                ComfyCache.set(f'image.{image_hash}.used_timestamp', time.time())
+                image_input = ComfyCache.get(f'image.{image_hash}.input')
+            else:
+                ComfyCache.set(f'image.{image_hash}', {
+					"input": image.convert("RGBA"),
+					"timestamp": time.time(),
+					"used_timestamp": time.time(),
+					"device": device,
+					"output": None
+				})
+                ComfyLogger().log(f"Image {image_hash} loaded into cache", "DEBUG", True)
+                image_input = image
         else:
             ComfyLogger().log("No image provided to load", "ERROR", True)
             return None
-
         # If we reach this codepath, we have to perform inference on the image
-        tensor = cls.do_transform(
-            image=Image.fromarray(image_input).convert("RGBA"),
+        transform = cls().get_transform(
             width=384,
             height=384,
             interpolation=InterpolationMode.LANCZOS,
             grow=True,
             pad=None,
             background=0.5,
-        ).to(device)
+        )
+        tensor = transform(image_input).unsqueeze(0).to(device.type)
         if torch.cuda.is_available() is True and device.type == "cuda":
             tensor.cuda()
             if torch.cuda.get_device_capability()[0] >= 7:
@@ -203,12 +223,10 @@ class JtpImageManager(metaclass=Singleton):
                 ComfyLogger().log("Image loaded to GPU with mixed precision", "INFO", True)
             else:
                 ComfyLogger().log("Image loaded to older GPU without mixed precision", "WARNING", True)
-        else:
-            tensor.cpu()
         return tensor
 
     @classmethod
-    def unload_image(cls, image: Union[Path, numpy.ndarray, None]) -> bool:
+    def unload_image(cls, image: Union[Path, numpy.ndarray, Image.Image, None]) -> bool:
         """
         Unload an image from memory
         """
@@ -219,6 +237,12 @@ class JtpImageManager(metaclass=Singleton):
                 return True
         elif image is not None and isinstance(image, numpy.ndarray):
             image_hash = hashlib.sha256(image.tobytes(), usedforsecurity=False).hexdigest()
+            if cls.is_cached(image_hash):
+                ComfyCache.flush(f'image.{image_hash}')
+                return True
+        elif image is not None and isinstance(image, Image.Image):
+            img = numpy.array(image.convert("RGBA"), dtype=numpy.uint8)
+            image_hash = hashlib.sha256(img.tobytes(), usedforsecurity=False).hexdigest()
             if cls.is_cached(image_hash):
                 ComfyCache.flush(f'image.{image_hash}')
                 return True
@@ -237,6 +261,12 @@ class JtpImageManager(metaclass=Singleton):
                 return True
         elif image is not None and isinstance(image, numpy.ndarray) and output is not None:
             image_hash = hashlib.sha256(image.tobytes(), usedforsecurity=False).hexdigest()
+            if cls.is_cached(image_hash):
+                ComfyCache.set(f'image.{image_hash}.output', output)
+                return True
+        elif image is not None and isinstance(image, Image.Image) and output is not None:
+            img = numpy.array(image.convert("RGBA"), dtype=numpy.uint8)
+            image_hash = hashlib.sha256(img.tobytes(), usedforsecurity=False).hexdigest()
             if cls.is_cached(image_hash):
                 ComfyCache.set(f'image.{image_hash}.output', output)
                 return True

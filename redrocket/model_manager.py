@@ -60,13 +60,13 @@ class JtpModelManager(metaclass=Singleton):
         """
         model_path = os.path.join(cls().model_basepath, f"{model_name}.safetensors")
         if cls.is_loaded(model_name):
-            ComfyLogger().log(f"Model {model_name} already loaded", "WARNING", True)
+            ComfyLogger().log(message=f"Model {model_name} already loaded", type="WARNING", always=True)
             return True
         if not os.path.exists(model_path):
-            ComfyLogger().log(f"Model {model_name} not found in path: {model_path}", "ERROR", True)
+            ComfyLogger().log(message=f"Model {model_name} not found in path: {model_path}",type= "ERROR", always=True)
             return False
         
-        ComfyLogger().log(f"Loading model {model_name} (version: {version}) from {model_path}...", "INFO", True)
+        ComfyLogger().log(message=f"Loading model {model_name} (version: {version}) from {model_path}...", type="INFO", always=True)
         model: torch.nn.Module = timm.create_model("vit_so400m_patch14_siglip_384.webli", pretrained=False, num_classes=9083)
         if f"{version}" == "2":
             model.head = V2GatedHead(min(model.head.weight.shape), 9083)
@@ -80,7 +80,7 @@ class JtpModelManager(metaclass=Singleton):
             "version": version,
             "device": device
         })
-        ComfyLogger().log(f"Model {model_name} loaded successfully", "INFO", True)
+        ComfyLogger().log(message=f"Model {model_name} loaded successfully", type="INFO", always=True)
         return True
 
     @classmethod
@@ -89,27 +89,27 @@ class JtpModelManager(metaclass=Singleton):
         Switch the device of a RedRocket JTP Vision Transformer model
         """
         if not cls.is_loaded(model_name):
-            ComfyLogger().log(f"Model {model_name} not loaded, nothing to do here", "WARNING", True)
+            ComfyLogger().log(message=f"Model {model_name} not loaded, nothing to do here", type="WARNING", always=True)
             return False
         model: Union[torch.nn.Module, None] = ComfyCache.get(f'model.{model_name}.model')
         if model is None:
-            ComfyLogger().log(f"Model {model_name} is not loaded, cannot switch it to another device", "ERROR", True)
+            ComfyLogger().log(message=f"Model {model_name} is not loaded, cannot switch it to another device", type="ERROR", always=True)
             return False
         if device.type == "cuda" and not torch.cuda.is_available():
-            ComfyLogger().log("CUDA is not available, cannot switch to GPU", "ERROR", True)
+            ComfyLogger().log(message="CUDA is not available, cannot switch to GPU", type="ERROR", always=True)
             return False
         if device.type == "cuda" and torch.cuda.get_device_capability()[0] >= 7:
             model.cuda()
             model = model.to(dtype=torch.float16, memory_format=torch.channels_last)
-            ComfyLogger().log("Switched to GPU with mixed precision", "INFO", True)
+            ComfyLogger().log(message="Switched to GPU with mixed precision", type="INFO", always=True)
         elif device.type == "cuda" and torch.cuda.get_device_capability()[0] < 7:
             model.cuda()
             model = model.to(dtype=torch.float32, memory_format=torch.channels_last)
-            ComfyLogger().log("Switched to GPU without mixed precision", "WARNING", True)
+            ComfyLogger().log(message="Switched to GPU without mixed precision", type="WARNING", always=True)
         else:
             model.cpu()
             model = model.to(device=device)
-            ComfyLogger().log("Switched to CPU", "INFO", True)
+            ComfyLogger().log(message="Switched to CPU", type="INFO", always=True)
         ComfyCache.set(f'model.{model_name}.device', device)
         ComfyCache.set(f'model.{model_name}.model', model)
         return True
@@ -120,7 +120,7 @@ class JtpModelManager(metaclass=Singleton):
         Unload a RedRocket JTP Vision Transformer model from memory
         """
         if not cls.is_loaded(model_name):
-            ComfyLogger().log(f"Model {model_name} not loaded, nothing to do here", "WARNING", True)
+            ComfyLogger().log(message=f"Model {model_name} not loaded, nothing to do here", type="WARNING", always=True)
             return True
         ComfyCache.flush(f'model.{model_name}')
         gc.collect()
@@ -142,7 +142,7 @@ class JtpModelManager(metaclass=Singleton):
         """
         model_path = os.path.abspath(cls().model_basepath)
         if not os.path.exists(model_path):
-            ComfyLogger().log(f"Model path {model_path} does not exist, it is being created", "WARN", True)
+            ComfyLogger().log(message=f"Model path {model_path} does not exist, it is being created", type="WARN", always=True)
             os.makedirs(os.path.abspath(model_path))
             return []
         models = list(filter(
@@ -170,12 +170,12 @@ class JtpModelManager(metaclass=Singleton):
         if not url.endswith(".safetensors"):
             url += f"{model_name}.safetensors"
         
-        ComfyLogger().log(f"Downloading model {model_name} from {url}", "INFO", True)
+        ComfyLogger().log(message=f"Downloading model {model_name} from {url}", type="INFO", always=True)
         async with aiohttp.ClientSession(loop=asyncio.get_event_loop()) as session:
             try:
                 await ComfyHTTP().download_to_file(url=url, destination=model_path, update_callback=cls().download_progress_callback, session=session)
             except aiohttp.client_exceptions.ClientConnectorError as err:
-                ComfyLogger().log("Unable to download model. Download files manually or try using a HF mirror/proxy in your config.json", "ERROR", True)
+                ComfyLogger().log(message="Unable to download model. Download files manually or try using a HF mirror/proxy in your config.json", type="ERROR", always=True)
                 return False
             await cls().download_complete_callback(model_name)
         return True

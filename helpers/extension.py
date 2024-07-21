@@ -77,36 +77,36 @@ class ComfyExtension(metaclass=Singleton):
         from .files import ComfyFiles
         src_dir = cls().extension_dir(f"web{os.sep}js")
         if not os.path.exists(src_dir):
-            ComfyLogger().log(f"js installation skipped, source directory {src_dir} does not exist", type="WARNING", always=True)
+            ComfyLogger().log(nessage=f"js installation skipped, source directory {src_dir} does not exist", type="WARNING", always=True)
             return
         should_install = cls().should_install_js()
         if should_install:
-            ComfyLogger().log("It looks like you're running an old version of ComfyUI that requires manual setup of web files, it is recommended you update your installation.", "WARNING", True)
+            ComfyLogger().log(message="It looks like you're running an old version of ComfyUI that requires manual setup of web files, it is recommended you update your installation.", type="WARNING", always=True)
         dst_dir = cls().web_extension_dir()
         linked = ComfyFiles().is_symlink(dst_dir)
         if linked or os.path.exists(dst_dir):
             if linked:
                 if should_install:
-                    ComfyLogger().log("JS already linked, PromptServer will serve extension", type='INFO')
+                    ComfyLogger().log("JS already linked, PromptServer will serve extension", type='INFO', always=True)
                 else:
                     os.unlink(dst_dir)
-                    ComfyLogger().log("JS unlinked, PromptServer will serve extension", type='INFO')
+                    ComfyLogger().log("JS unlinked, PromptServer will serve extension", type='INFO', always=True)
             elif not should_install:
                 shutil.rmtree(dst_dir)
-                ComfyLogger().log("JS deleted, PromptServer will serve extension", type='INFO')
+                ComfyLogger().log("JS deleted, PromptServer will serve extension", type='INFO', always=True)
             return
         if not should_install:
-            ComfyLogger().log("JS skipped, PromptServer will serve extension", type='WARNING')
+            ComfyLogger().log("JS skipped, PromptServer will serve extension", type='WARNING', always=True)
             return
         if ComfyFiles().link_item(src_dir, dst_dir):
-            ComfyLogger().log("JS linked, extension will be served by JavaScript", type='INFO')
+            ComfyLogger().log("JS linked, extension will be served by JavaScript", type='INFO', always=True)
             return
-        ComfyLogger().log("Installing JS files", type='INFO')
+        ComfyLogger().log("Installing JS files", type='INFO', always=True)
         shutil.copytree(src_dir, dst_dir, dirs_exist_ok=True)
 
     @classmethod
     def should_install_js(cls) -> bool:
-        return not hasattr(PromptServer.instance, "supports") or "custom_nodes_from_web" not in PromptServer.instance.supports
+        return not hasattr(PromptServer.instance, "supports") and "custom_nodes_from_web" not in PromptServer.instance.supports
 
     @classmethod
     def init(cls, check_imports: Optional[List[str]]) -> bool:

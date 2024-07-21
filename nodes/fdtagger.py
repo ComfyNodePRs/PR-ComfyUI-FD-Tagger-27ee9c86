@@ -26,7 +26,7 @@ class ModelDevice(Enum):
     def to_torch_device(self) -> torch.device:
         return torch.device(self.value)
 
-async def classify_tags(image: np.ndarray, model_name: str, tags_name: str, device: torch.device, steps: float = 0.35, threshold: float = 0.35, exclude_tags: str = "", replace_underscore: bool = True, trailing_comma: bool = False) -> Tuple[str, Dict[str, float]]:
+async def classify_tags(image: Image.Image, model_name: str, tags_name: str, device: torch.device, steps: float = 0.35, threshold: float = 0.35, exclude_tags: str = "", replace_underscore: bool = True, trailing_comma: bool = False) -> Tuple[str, Dict[str, float]]:
     """
     Classify e621 tags for an image using RedRocket JTP Vision Transformer model
     """
@@ -123,7 +123,7 @@ class FDTagger():
     OUTPUT_NODE: bool = True
     CATEGORY: str = "🐺 Furry Diffusion"
 
-    def tag(self, image: np.ndarray, device: str, model: str, steps: int, threshold: float, exclude_tags: str = "", replace_underscore: bool = False, trailing_comma: bool = False) -> Dict[str, Any]:
+    def tag(self, image: Image.Image, device: str, model: str, steps: int, threshold: float, exclude_tags: str = "", replace_underscore: bool = False, trailing_comma: bool = False) -> Dict[str, Any]:
         model_name = ComfyExtensionConfig().get_model_from_name(model)
         tags_name = ComfyExtensionConfig().get_tags_from_name(model)
         device_type = ModelDevice(device)
@@ -133,7 +133,8 @@ class FDTagger():
         tags: List[str] = []
         scores: List[Dict[str, float]] = []
         for i in range(tensor.shape[0]):
-            tags_t, scores_t = ComfyThreading().wait_for_async(lambda: classify_tags(image=tensor[i], model_name=model_name, tags_name=tags_name, device=device_type.to_torch_device(), threshold=threshold,
+            img: Image.Image = Image.fromarray(tensor[i]).convert("RGBA")
+            tags_t, scores_t = ComfyThreading().wait_for_async(lambda: classify_tags(image=img, model_name=model_name, tags_name=tags_name, device=device_type.to_torch_device(), threshold=threshold,
                         exclude_tags=exclude_tags, replace_underscore=replace_underscore, trailing_comma=trailing_comma))
             tags.append(tags_t)
             scores.append(scores_t)
