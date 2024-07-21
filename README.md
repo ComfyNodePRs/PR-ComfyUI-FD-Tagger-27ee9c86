@@ -54,6 +54,7 @@ Use the [ComfyUI-Manager](https://github.com/ltdrdata/ComfyUI-Manager) extension
     ```
     pip install -r requirements.txt
     ```
+<<<<<<< HEAD
 
 5. You're now free to start your ComfyUI instance as you normally do.
 
@@ -91,6 +92,11 @@ The node supports tagging and outputting multiple batched inputs.  It can handle
 | --- | ----------------------- |
 | ``tags[]`` | A string array of prompts, in sequential order of image batch (if multiple)
 
+=======
+
+5. You're now free to start your ComfyUI instance as you normally do.
+
+>>>>>>> dev
 ## Quick interrogation Feature
 
 Quick interrogation of images is also available on any node that is displaying an image, e.g. a `LoadImage`, `SaveImage`, `PreviewImage` node.  

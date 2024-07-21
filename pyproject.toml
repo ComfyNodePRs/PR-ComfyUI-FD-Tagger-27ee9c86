@@ -3,7 +3,11 @@ name = "comfyui-fd-tagger"
 description = "A furry-friendly ComfyUI extension allowing the interrogation of e621 tags from images."
 version = "1.0.2"
 license = "LICENSE"
+<<<<<<< HEAD
 dependencies = ["torch", "torchvision", "pillow", "requests", "comfyui", "aiohttp", "numpy"]
+=======
+dependencies = ["torch", "torchvision", "pillow", "requests", "comfyui", "aiohttp", "numpy", "msgspec", "colorama"]
+>>>>>>> dev
 
 [project.urls]
 Repository = "https://github.com/loopyd/ComfyUI-FD-Tagger"

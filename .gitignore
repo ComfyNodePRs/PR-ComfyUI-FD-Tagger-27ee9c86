@@ -1,2 +1,4 @@
 models
+tags
 __pycache__
+*.py[cod]

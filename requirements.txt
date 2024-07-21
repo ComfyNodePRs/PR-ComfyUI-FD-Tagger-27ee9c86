@@ -3,4 +3,11 @@ requests
 aiohttp
 torch
 torchvision
+<<<<<<< HEAD
 numpy
+=======
+numpy
+tqdm
+msgspec
+colorama
+>>>>>>> dev
