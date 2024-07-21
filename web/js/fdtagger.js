@@ -30,7 +30,7 @@ class FDTagger {
 			statusTagHandler: true,
 		};
 
-		api.addEventListener("furrydiffusion/fdtagger/update_status", ({ detail }) => {
+		api.addEventListener("furrydiffusion/update_status", ({ detail }) => {
 			let { node, progress, text } = detail;
 			const n = app.graph.getNodeById(+(node || app.runningNodeId));
 			if (!n) return;

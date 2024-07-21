@@ -1,13 +1,14 @@
 import asyncio
 import gc
 import os
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Union
 from aiohttp import web
 import aiohttp
 import torch
 import timm
 import safetensors.torch
 
+from ..helpers.cache import CacheCleanupMethod, ComfyCache
 from ..helpers.http import ComfyHTTP
 from ..helpers.config import ComfyExtensionConfig
 from ..helpers.logger import ComfyLogger
@@ -16,9 +17,8 @@ from ..helpers.metaclasses import Singleton
 
 class V2GatedHead(torch.nn.Module):
     def __init__(self,
-        num_features: int,
-        num_classes: int
-    ):
+                 num_features: int,
+                 num_classes: int):
         super().__init__()
         self.num_classes = num_classes
         self.linear = torch.nn.Linear(num_features, num_classes * 2)
@@ -39,14 +39,11 @@ class JtpModelManager(metaclass=Singleton):
         self.model_basepath = model_basepath
         self.download_progress_callback = download_progress_callback
         self.download_complete_callback = download_complete_callback
-        self.data = {}
-
+        ComfyCache.set_max_size('model', 10)  # Adjust the max size as needed
+        ComfyCache.set_cachemethod('model', CacheCleanupMethod.ROUND_ROBIN)
+    
     def __del__(self) -> None:
-        for model_name in self.data.keys():
-            if self.is_loaded(model_name):
-                _ = self.unload(model_name)
-        self.data.clear()
-        del self.data
+        ComfyCache.flush('model')
         gc.collect()
     
     @classmethod
@@ -54,35 +51,35 @@ class JtpModelManager(metaclass=Singleton):
         """
         Check if a RedRocket JTP Vision Transformer model is loaded into memory
         """
-        return model_name in cls().data.keys() and cls().data[model_name]["model"] is not None
+        return ComfyCache.get(f'model.{model_name}') is not None and ComfyCache.get(f'model.{model_name}.model') is not None
     
     @classmethod
-    def load(cls, model_name: str, version: int = 1, device: torch.device = torch.cpu) -> bool:
+    def load(cls, model_name: str, version: int = 1, device: torch.device = torch.device('cpu')) -> bool:
         """
         Load a RedRocket JTP Vision Transformer model into memory
         """
         model_path = os.path.join(cls().model_basepath, f"{model_name}.safetensors")
-        if cls().is_loaded(model_name):
+        if cls.is_loaded(model_name):
             ComfyLogger().log(f"Model {model_name} already loaded", "WARNING", True)
             return True
         if not os.path.exists(model_path):
             ComfyLogger().log(f"Model {model_name} not found in path: {model_path}", "ERROR", True)
             return False
         
-        ComfyLogger().log(f"Loading model {model_name} (version: {version} from {model_path}...", "INFO", True)
-        cls().data[model_name] = {
-            "model" : timm.create_model("vit_so400m_patch14_siglip_384.webli", pretrained=False, num_classes=9083),
+        ComfyLogger().log(f"Loading model {model_name} (version: {version}) from {model_path}...", "INFO", True)
+        model: torch.nn.Module = timm.create_model("vit_so400m_patch14_siglip_384.webli", pretrained=False, num_classes=9083)
+        if f"{version}" == "2":
+            model.head = V2GatedHead(min(model.head.weight.shape), 9083)
+        safetensors.torch.load_model(model=model, filename=model_path)
+        if torch.cuda.is_available() and device.type == "cuda":
+            model.cuda()
+            model.to(dtype=torch.float16, memory_format=torch.channels_last)
+        model.eval()
+        ComfyCache.set(f'model.{model_name}', {
+            "model": model,
             "version": version,
             "device": device
-        }
-        if f"{version}" == "2":
-            cls().data[model_name]["model"].head = V2GatedHead(min(cls().data[model_name]["model"].head.weight.shape), 9083)
-        safetensors.torch.load_model(model=cls().data[model_name]["model"], filename=model_path)
-        if torch.cuda.is_available() is True and device.type == "cuda":
-            cls().data[model_name]["model"].cuda()
-            cls().data[model_name]["model"].to(dtype=torch.float16, memory_format=torch.channels_last)
-        cls().data[model_name]["device"] = device
-        cls().data[model_name]["model"].eval()
+        })
         ComfyLogger().log(f"Model {model_name} loaded successfully", "INFO", True)
         return True
 
@@ -91,27 +88,30 @@ class JtpModelManager(metaclass=Singleton):
         """
         Switch the device of a RedRocket JTP Vision Transformer model
         """
-        if not cls().is_loaded(model_name):
+        if not cls.is_loaded(model_name):
             ComfyLogger().log(f"Model {model_name} not loaded, nothing to do here", "WARNING", True)
             return False
-        if device.type == "cuda" and torch.cuda.is_available() is False:
+        model: Union[torch.nn.Module, None] = ComfyCache.get(f'model.{model_name}.model')
+        if model is None:
+            ComfyLogger().log(f"Model {model_name} is not loaded, cannot switch it to another device", "ERROR", True)
+            return False
+        if device.type == "cuda" and not torch.cuda.is_available():
             ComfyLogger().log("CUDA is not available, cannot switch to GPU", "ERROR", True)
             return False
         if device.type == "cuda" and torch.cuda.get_device_capability()[0] >= 7:
-            cls().data[model_name]["model"].cuda()
-            cls().data[model_name]["model"] = cls().data[model_name]["model"].to(dtype=torch.float16, memory_format=torch.channels_last)
-            cls().data[model_name]["device"] = device
+            model.cuda()
+            model = model.to(dtype=torch.float16, memory_format=torch.channels_last)
             ComfyLogger().log("Switched to GPU with mixed precision", "INFO", True)
         elif device.type == "cuda" and torch.cuda.get_device_capability()[0] < 7:
-            cls().data[model_name]["model"].cuda()
-            cls().data[model_name]["model"].to(device)
-            cls().data[model_name]["device"] = device
+            model.cuda()
+            model = model.to(dtype=torch.float32, memory_format=torch.channels_last)
             ComfyLogger().log("Switched to GPU without mixed precision", "WARNING", True)
         else:
-            cls().data[model_name]["model"].cpu()
-            cls().data[model_name]["model"].to(device)
-            cls().data[model_name]["device"] = device
+            model.cpu()
+            model = model.to(device=device)
             ComfyLogger().log("Switched to CPU", "INFO", True)
+        ComfyCache.set(f'model.{model_name}.device', device)
+        ComfyCache.set(f'model.{model_name}.model', model)
         return True
     
     @classmethod
@@ -119,13 +119,12 @@ class JtpModelManager(metaclass=Singleton):
         """
         Unload a RedRocket JTP Vision Transformer model from memory
         """
-        if not cls().is_loaded(model_name):
+        if not cls.is_loaded(model_name):
             ComfyLogger().log(f"Model {model_name} not loaded, nothing to do here", "WARNING", True)
             return True
-        del cls().data[model_name]["model"]
-        cls().data[model_name]["model"] = None
+        ComfyCache.flush(f'model.{model_name}')
         gc.collect()
-        if torch.cuda.is_available() is True:
+        if torch.cuda.is_available():
             torch.cuda.empty_cache()
         return True
 
@@ -134,7 +133,7 @@ class JtpModelManager(metaclass=Singleton):
         """
         Check if a vision transformer model is installed in a directory
         """
-        return any(model_name + ".safetensors" in s for s in cls().list_installed())
+        return any(model_name + ".safetensors" in s for s in cls.list_installed())
     
     @classmethod
     def list_installed(cls) -> List[str]:

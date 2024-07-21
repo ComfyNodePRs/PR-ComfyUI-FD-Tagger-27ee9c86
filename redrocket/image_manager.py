@@ -11,6 +11,8 @@ from torchvision.transforms import transforms
 from torchvision.transforms import InterpolationMode
 import torchvision.transforms.functional as TF
 
+from ..helpers.cache import CacheCleanupMethod, ComfyCache
+
 from ..helpers.metaclasses import Singleton
 
 
@@ -90,47 +92,36 @@ class CompositeAlpha(torch.nn.Module):
         )
 
 
-class ImageCacheType(Enum):
-	"""
-	An enumeration of the types of image caches
-	"""
-	ROUNDROBIN = "roundrobin"
-	LEAST_RECENTLY_USED = "least_recently_used"
-
-
 class JtpImageManager(metaclass=Singleton):
-	def __init__(self, cache_maxsize: int = 10, cache_method: ImageCacheType = ImageCacheType.ROUNDROBIN) -> None:
-		self.data = {}
-		self.data["images"] = {}
-		self.cache_maxsize = cache_maxsize if cache_maxsize > 0 else 10
-		self.cache_method = cache_method if cache_method in ImageCacheType else ImageCacheType.ROUNDROBIN
+    def __init__(self, cache_maxsize: int = 10, cache_method: CacheCleanupMethod = CacheCleanupMethod.ROUND_ROBIN) -> None:
+        ComfyCache.set_max_size('image', cache_maxsize)
+        ComfyCache.set_cachemethod('image', CacheCleanupMethod[cache_method.name])
   
-	def __del__(self) -> None:
-		self.data.clear()
-		del self.data
-		import gc
-		gc.collect()
+    def __del__(self) -> None:
+        ComfyCache.flush('image')
+        import gc
+        gc.collect()
 
-	@classmethod
-	def is_cached(cls, image_name: str) -> bool:
-		"""
-		Check if an image is loaded into memory
-		"""
-		return image_name in cls().data.keys() and cls().data[image_name] is not None and cls().data[image_name]["input"] is not None
+    @classmethod
+    def is_cached(cls, image_name: str) -> bool:
+        """
+        Check if an image is loaded into memory
+        """
+        return ComfyCache.get(f'image.{image_name}') is not None and ComfyCache.get(f'image.{image_name}.input') is not None
 
-	@classmethod
-	def is_done(cls, image_name: str) -> bool:
-		"""
-		Check if an image is done processing
-		"""
-		return cls().is_cached(image_name) and image_name in cls().data.keys() and cls().data[image_name] is not None and cls().data[image_name]["output"] is not None
+    @classmethod
+    def is_done(cls, image_name: str) -> bool:
+        """
+        Check if an image is done processing
+        """
+        return cls.is_cached(image_name) and ComfyCache.get(f'image.{image_name}.output') is not None
 
-	@classmethod
-	def do_transform(cls, image: numpy.ndarray, width: int, height: int, interpolation, grow, pad, background: Tuple[int, int, int]) -> torch.Tensor:
-		"""
-		Perform transformations on an image
-  		"""
-		return transforms.Compose([
+    @classmethod
+    def do_transform(cls, image: numpy.ndarray, width: int, height: int, interpolation, grow, pad, background: Tuple[int, int, int]) -> torch.Tensor:
+        """
+        Perform transformations on an image
+        """
+        return transforms.Compose([
             Fit(bounds=(width, height), interpolation=interpolation, grow=grow, pad=pad),
             transforms.ToTensor(),
             CompositeAlpha(background=background),
@@ -138,142 +129,117 @@ class JtpImageManager(metaclass=Singleton):
             transforms.CenterCrop(size=(width, height)),
         ])(image).unsqueeze(0)
   
-	@classmethod
-	def cache_roundrobin(cls) -> None:
-		"""
-		Remove the oldest image from the cache
-		"""
-		if len(cls().data.keys()) >= cls().cache_maxsize:
-			oldest = min(cls().data, key=lambda k: cls().data[k]["timestamp"])
-			_ = cls().data.pop(oldest)
-   
-	@classmethod
-	def cache_lastrecentlyused(cls) -> None:
-		"""
-		Remove the last recently used image from the cache
-		"""
-		if len(cls().data.keys()) >= cls().cache_maxsize:
-			lastused = min(cls().data, key=lambda k: cls().data[k]["used_timestamp"])
-			_ = cls().data.pop(lastused)
-   
-	@classmethod
-	def load(cls, image: Union[Path, numpy.ndarray, None]) -> Union[Tuple[str, Dict[str, Any]], torch.Tensor, None]:
-		"""
-		Load an image into memory
+    @classmethod
+    def load(cls, image: Union[Path, numpy.ndarray, None], device: torch.device) -> Union[Tuple[str, Dict[str, Any]], torch.Tensor, None]:
+        """
+        Load an image into memory
   
-		- Return None if no image is provided or there was an error loading it
-		- Return a loaded tensor if we need to perform inference on it
-		- Return a tuple containg tags and tag:score dict if we are already through with it.
-		"""
-		from ..helpers.logger import ComfyLogger
-		if image is not None and isinstance(image, Path):
-			# Image is a path to an image, so load it with PIL, then stuff into a numpy array
-			image = str(image)
-			if cls().is_done(image):
-				ComfyLogger().log(f"Image {image} already processed, using from cache", "WARNING", True)
-				return cls().data[image]["output"]
-			if cls().is_cached(image):
-				ComfyLogger().log(f"Image {image} already loaded, using from cache", "WARNING", True)
-				cls().data[image]["used_timestamp"] = time.time()
-				image_input = cls().data[image]["input"]
-			else:
-				if not os.path.exists(image):
-					ComfyLogger.log(f"Image {image} not found in path: {image}", "ERROR", True)
-					return None
-				cache_func = {
-					ImageCacheType.ROUNDROBIN: cls().cache_roundrobin,
-					ImageCacheType.LEAST_RECENTLY_USED: cls().cache_lastrecentlyused
-				}
-				cache_func[cls().cache_method]()
-				cls().data[image] = {
-					"input": numpy.array(Image.open(image).convert("RGBA")).reshape([0]),
-					"timestamp": time.time(),
-					"used_timestamp": time.time(),
-					"output": None
-				}
-				ComfyLogger().log(f"Image: {image} loaded into cache", "DEBUG", True)
-				image_input = cls().data[image]["input"]
-		elif image is not None and isinstance(image, numpy.ndarray):
-			# Image is a numpy array, so sha256 it and look for it in the cache
-			image_hash = hashlib.sha256(image.tobytes(), usedforsecurity=False).hexdigest()
-			if cls().is_done(image):
-				ComfyLogger().log(f"Image {image} already processed, using from cache", "WARNING", True)
-				return cls().data[image]["output"]
-			if cls().is_cached(image_hash):
-				ComfyLogger().log(f"Image {image_hash} already loaded, using from cache", "WARNING", True)
-				cls().data[image_hash]["used_timestamp"] = time.time()
-				image_input = cls().data[image_hash]["input"]
-			else:
-				cache_func = {
-					ImageCacheType.ROUNDROBIN: cls().cache_roundrobin,
-					ImageCacheType.LEAST_RECENTLY_USED: cls().cache_lastrecentlyused
-				}
-				cache_func[cls().cache_method]()
-				cls().data[image_hash] = {
-					"input": image.reshape([0]),
-					"timestamp": time.time(),
-					"used_timestamp": time.time(),
-					"output": None
-				}
-				ComfyLogger().log(f"Image {image_hash} loaded into cache", "DEBUG", True)
-				image_input = cls().data[image_hash]["input"]
-		else:
-			ComfyLogger().log("No image provided to load", "ERROR", True)
-			return None
+        - Return None if no image is provided or there was an error loading it
+        - Return a loaded tensor if we need to perform inference on it
+        - Return a tuple containing tags and tag:score dict if we are already through with it.
+        """
+        from ..helpers.logger import ComfyLogger
+        if image is not None and isinstance(image, Path):
+            # Image is a path to an image, so load it with PIL, then stuff into a numpy array
+            image = str(image)
+            if cls.is_done(image):
+                ComfyLogger().log(f"Image {image} already processed, using from cache", "WARNING", True)
+                return ComfyCache.get(f'image.{image}.output')
+            if cls.is_cached(image):
+                ComfyLogger().log(f"Image {image} already loaded, using from cache", "WARNING", True)
+                ComfyCache.set(f'image.{image}.used_timestamp', time.time())
+                image_input = ComfyCache.get(f'image.{image}.input')
+            else:
+                if not os.path.exists(image):
+                    ComfyLogger.log(f"Image {image} not found in path: {image}", "ERROR", True)
+                    return None
+                ComfyCache.set(f'image.{image}', {
+                    "input": numpy.array(Image.open(image).convert("RGBA"), dtype=numpy.uint8),
+                    "timestamp": time.time(),
+                    "used_timestamp": time.time(),
+                    "device": device,
+                    "output": None
+                })
+                ComfyLogger().log(f"Image: {image} loaded into cache", "DEBUG", True)
+                image_input = ComfyCache.get(f'image.{image}.input')
+        elif image is not None and isinstance(image, numpy.ndarray):
+            # Image is a numpy array, so sha256 it and look for it in the cache
+            image_hash = hashlib.sha256(image.tobytes(), usedforsecurity=False).hexdigest()
+            if cls.is_done(image_hash):
+                ComfyLogger().log(f"Image {image} already processed, using from cache", "WARNING", True)
+                return ComfyCache.get(f'image.{image_hash}.output')
+            if cls.is_cached(image_hash):
+                ComfyLogger().log(f"Image {image_hash} already loaded, using from cache", "WARNING", True)
+                ComfyCache.set(f'image.{image_hash}.used_timestamp', time.time())
+                image_input = ComfyCache.get(f'image.{image_hash}.input')
+            else:
+                ComfyCache.set(f'image.{image_hash}', {
+                    "input": image,
+                    "timestamp": time.time(),
+                    "used_timestamp": time.time(),
+                    "device": device,
+                    "output": None
+                })
+                ComfyLogger().log(f"Image {image_hash} loaded into cache", "DEBUG", True)
+                image_input = ComfyCache.get(f'image.{image_hash}.input')
+        else:
+            ComfyLogger().log("No image provided to load", "ERROR", True)
+            return None
 
-		# If we reach this codepath, we have to perform inference on the image
-		tensor = cls().do_transform(
-      		image=image_input,
-			width=384,
-			height=384,
-			interpolation=InterpolationMode.LANCZOS,
-			grow=True,
-			pad=None,
-			background=0.5,
-		)
-		if cls().device.type == 'cuda' and torch.cuda.is_available():
-			tensor.cuda()
-			if torch.cuda.get_device_capability()[0] >= 7:
-				tensor = tensor.to(dtype=torch.float16, memory_format=torch.channels_last)
-				ComfyLogger().log("Image loaded to GPU with mixed precision", "INFO", True)
-			else:
-				ComfyLogger().log("Image loaded to older GPU without mixed precision", "WARNING", True)
-		else:
-			tensor.cpu()
-		return tensor
+        # If we reach this codepath, we have to perform inference on the image
+        tensor = cls.do_transform(
+            image=Image.fromarray(image_input).convert("RGBA"),
+            width=384,
+            height=384,
+            interpolation=InterpolationMode.LANCZOS,
+            grow=True,
+            pad=None,
+            background=0.5,
+        ).to(device)
+        if torch.cuda.is_available() is True and device.type == "cuda":
+            tensor.cuda()
+            if torch.cuda.get_device_capability()[0] >= 7:
+                tensor = tensor.to(dtype=torch.float16, memory_format=torch.channels_last)
+                ComfyLogger().log("Image loaded to GPU with mixed precision", "INFO", True)
+            else:
+                ComfyLogger().log("Image loaded to older GPU without mixed precision", "WARNING", True)
+        else:
+            tensor.cpu()
+        return tensor
 
-	@classmethod
-	def unload_image(cls, image: Union[Path, numpy.ndarray, None]) -> bool:
-		"""
-		Unload an image from memory
-		"""
-		if image is not None and isinstance(image, Path):
-			image = str(image)
-			if cls().is_cached(image):
-				_ = cls().data.pop(image)
-				return True
-		elif image is not None and isinstance(image, numpy.ndarray):
-			image_hash = hashlib.sha256(image.tobytes(), usedforsecurity=False).hexdigest()
-			if cls().is_cached(image_hash):
-				_ = cls().data.pop(image_hash)
-				return True
-		return False
+    @classmethod
+    def unload_image(cls, image: Union[Path, numpy.ndarray, None]) -> bool:
+        """
+        Unload an image from memory
+        """
+        if image is not None and isinstance(image, Path):
+            image = str(image)
+            if cls.is_cached(image):
+                ComfyCache.flush(f'image.{image}')
+                return True
+        elif image is not None and isinstance(image, numpy.ndarray):
+            image_hash = hashlib.sha256(image.tobytes(), usedforsecurity=False).hexdigest()
+            if cls.is_cached(image_hash):
+                ComfyCache.flush(f'image.{image_hash}')
+                return True
+        return False
 
-	@classmethod
-	def commit_cache(cls, image, output: Tuple[str, Dict[str, Any]]) -> bool:
-		"""
-		Commit the output of an image to the cache
-		"""
-		if image is not None and isinstance(image, Path):
-			image = str(image)
-			if cls().is_cached(image):
-				cls().data[image]["output"] = output
-				return True
-		elif image is not None and isinstance(image, numpy.ndarray):
-			image_hash = hashlib.sha256(image.tobytes(), usedforsecurity=False).hexdigest()
-			if cls().is_cached(image_hash):
-				cls().data[image_hash]["output"] = output
-				return True
-		return False	
-  
-  
+    @classmethod
+    async def commit_cache(cls, image, output: Tuple[str, Dict[str, Any]]) -> bool:
+        """
+        Commit the output of an image to the cache
+        """
+        from ..helpers.logger import ComfyLogger
+        if image is not None and isinstance(image, Path) and output is not None:
+            image = str(image)
+            if cls.is_cached(image):
+                ComfyCache.set(f'image.{image}.output', output)
+                return True
+        elif image is not None and isinstance(image, numpy.ndarray) and output is not None:
+            image_hash = hashlib.sha256(image.tobytes(), usedforsecurity=False).hexdigest()
+            if cls.is_cached(image_hash):
+                ComfyCache.set(f'image.{image_hash}.output', output)
+                return True
+        else:
+            ComfyLogger().log("Nothing to commit to cache", "ERROR", True)
+        return False

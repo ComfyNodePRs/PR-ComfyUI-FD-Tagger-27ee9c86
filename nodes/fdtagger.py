@@ -7,6 +7,8 @@ from aiohttp import web
 from typing import List, Optional, Union, Tuple, Dict, Any
 
 import comfy.utils
+from ..helpers.cache import CacheCleanupMethod
+from ..redrocket.image_manager import JtpImageManager
 from server import PromptServer
 
 from ..redrocket.tag_manager import JtpTagManager
@@ -15,6 +17,7 @@ from ..redrocket.classifier import JtpInference
 from ..helpers.extension import ComfyExtension
 from ..helpers.config import ComfyExtensionConfig
 from ..helpers.multithreading import ComfyThreading
+
     
 class ModelDevice(Enum):
     CPU = "cpu"
@@ -23,12 +26,11 @@ class ModelDevice(Enum):
     def to_torch_device(self) -> torch.device:
         return torch.device(self.value)
 
-
 async def classify_tags(image: np.ndarray, model_name: str, tags_name: str, device: torch.device, steps: float = 0.35, threshold: float = 0.35, exclude_tags: str = "", replace_underscore: bool = True, trailing_comma: bool = False) -> Tuple[str, Dict[str, float]]:
     """
     Classify e621 tags for an image using RedRocket JTP Vision Transformer model
     """
-    tag_string, tag_scores = await JtpInference(device=device).run_classifier(model_name=model_name, device=device, tags_name=tags_name, image=image, steps=steps, threshold=threshold, exclude_tags=exclude_tags, replace_underscore=replace_underscore, trailing_comma=trailing_comma)
+    tag_string, tag_scores = await JtpInference().run_classifier(model_name=model_name, device=device, tags_name=tags_name, image=image, steps=steps, threshold=threshold, exclude_tags=exclude_tags, replace_underscore=replace_underscore, trailing_comma=trailing_comma)
     return tag_string, tag_scores
 
 
@@ -114,8 +116,9 @@ class FDTagger():
             "exclude_tags": ("STRING", {"default": ComfyExtensionConfig().get(property="fdtagger_settings.exclude_tags"), "multiline": True}),
         }}
 
-    RETURN_TYPES: Tuple[str] = ("STRING",)
-    OUTPUT_IS_LIST: Tuple[bool] = (True,)
+    RETURN_TYPES: Tuple[str] = ("STRING", "TAGSCORES",)
+    RETURN_NAMES: Tuple[str] = ("tags", "scores",)
+    OUTPUT_IS_LIST: Tuple[bool] = (True, True,)
     FUNCTION: str = "tag"
     OUTPUT_NODE: bool = True
     CATEGORY: str = "🐺 Furry Diffusion"
@@ -124,17 +127,23 @@ class FDTagger():
         model_name = ComfyExtensionConfig().get_model_from_name(model)
         tags_name = ComfyExtensionConfig().get_tags_from_name(model)
         device_type = ModelDevice(device)
-        tensor = np.array(image * steps, dtype=np.uint8)
+        tensor: np.ndarray = image * 255
+        tensor = np.array(tensor, dtype=np.uint8)
         pbar = comfy.utils.ProgressBar(tensor.shape[0])
         tags: List[str] = []
+        scores: List[Dict[str, float]] = []
         for i in range(tensor.shape[0]):
-            tags.append(ComfyThreading().wait_for_async(lambda: classify_tags(image=tensor[i], model_name=model_name, tags_name=tags_name, device=device_type.to_torch_device(), threshold=threshold,
-                        exclude_tags=exclude_tags, replace_underscore=replace_underscore, trailing_comma=trailing_comma)))
+            tags_t, scores_t = ComfyThreading().wait_for_async(lambda: classify_tags(image=tensor[i], model_name=model_name, tags_name=tags_name, device=device_type.to_torch_device(), threshold=threshold,
+                        exclude_tags=exclude_tags, replace_underscore=replace_underscore, trailing_comma=trailing_comma))
+            tags.append(tags_t)
+            scores.append(scores_t)
             pbar.update(1)
-        return {"ui": {"tags": tags}, "result": (tags,)}
+        return {"ui": {"tags": tags, "scores": scores}, "result": (tags, scores,)}
 
 JtpModelManager(model_basepath=ComfyExtension().extension_dir("models", mkdir=True), download_progress_callback=download_progress_callback, download_complete_callback=download_complete_callback)
 JtpTagManager(tags_basepath=ComfyExtension().extension_dir("tags", mkdir=True), download_progress_callback=download_progress_callback, download_complete_callback=download_complete_callback)
+JtpImageManager(cache_maxsize=ComfyExtensionConfig().get(property="image_cache_maxsize"), cache_method=CacheCleanupMethod(ComfyExtensionConfig().get(property="image_cache_method")))
+JtpInference(device=ComfyExtensionConfig().get(property="device"))
 
 NODE_CLASS_MAPPINGS: Dict[str, Any] = {
     "FD_Tagger|fdtagger": FDTagger,

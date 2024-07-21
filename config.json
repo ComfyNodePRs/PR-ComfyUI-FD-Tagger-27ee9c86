@@ -3,7 +3,9 @@
 	"logging": true,
 	"loglevel": "debug",
 	"huggingface_endpoint": "https://huggingface.co",
-	"api_endpoint": "/furrydiffusion",
+	"api_endpoint": "furrydiffusion",
+	"image_cache_maxsize": 100,
+	"image_cache_method": "round_robin",
 	"fdtagger_settings": {
 		"model": "RedRocket PILOT v1",
 		"steps": 255,

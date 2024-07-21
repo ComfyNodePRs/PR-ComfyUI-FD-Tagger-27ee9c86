@@ -7,6 +7,7 @@ import aiohttp
 import msgspec
 import torch
 
+from ..helpers.cache import CacheCleanupMethod, ComfyCache
 from ..helpers.metaclasses import Singleton
 
 
@@ -18,14 +19,11 @@ class JtpTagManager(metaclass=Singleton):
         self.tags_basepath = tags_basepath
         self.download_progress_callback = download_progress_callback
         self.download_complete_callback = download_complete_callback
-        self.data = {}
-
+        ComfyCache.set_max_size('tags', 10)
+        ComfyCache.set_cachemethod('tags', CacheCleanupMethod.ROUND_ROBIN)
+    
     def __del__(self) -> None:
-        for tags_name in self.data.keys():
-            if self.is_loaded(tags_name):
-                _ = self.download(tags_name)
-        self.data.clear()
-        del self.data
+        ComfyCache.flush('tags')
         gc.collect()
     
     @classmethod
@@ -33,7 +31,7 @@ class JtpTagManager(metaclass=Singleton):
         """
         Check if tags are loaded into memory
         """
-        return tags_name in cls().data.keys() and cls().data[tags_name]["tags"] is not None
+        return ComfyCache.get(f'tags.{tags_name}') is not None and ComfyCache.get(f'tags.{tags_name}.tags') is not None
     
     @classmethod
     def load(cls, tags_name: str, version: int) -> bool:
@@ -43,20 +41,26 @@ class JtpTagManager(metaclass=Singleton):
         from ..helpers.logger import ComfyLogger
         
         tags_path = os.path.join(cls().tags_basepath, f"{tags_name}.json")
-        if cls().is_loaded(tags_name):
+        if cls.is_loaded(tags_name):
             ComfyLogger().log(f"Tags for model {tags_name} already loaded", "WARNING", True)
             return True
         if not os.path.exists(tags_path):
-            ComfyLogger.log(f"Tags for model {tags_name} not found in path: {tags_path}", "ERROR", True)
+            ComfyLogger().log(f"Tags for model {tags_name} not found in path: {tags_path}", "ERROR", True)
             return False
         
         # TODO: Add a check for the version of the tags file differs
-        with open(tags_path, "r") as file:
-            cls().data[tags_name] = {
-                "tags": msgspec.json.decode(file.read(), type=Dict[str, float], strict=False),
-                "version": version
-            }
-        return True
+        try:
+            with open(tags_path, "r") as file:
+                ComfyCache.set(f'tags.{tags_name}', {
+                    "tags": msgspec.json.decode(file.read(), type=Dict[str, float], strict=False),
+                    "version": version
+                })
+            count = len(ComfyCache.get(f'tags.{tags_name}.tags'))
+            ComfyLogger().log(f"Loaded {count} tags for model {tags_name}", "INFO", True)
+            return True
+        except Exception as err:
+            ComfyLogger().log(f"Error loading tags for model {tags_name}: {err}", "ERROR", True)
+            return False
     
     @classmethod
     def unload(cls, tags_name: str) -> bool:
@@ -65,11 +69,10 @@ class JtpTagManager(metaclass=Singleton):
         """
         from ..helpers.logger import ComfyLogger
         
-        if not cls().is_loaded(tags_name):
+        if not cls.is_loaded(tags_name):
             ComfyLogger().log(f"Tags for model {tags_name} not loaded, nothing to do here", "WARNING", True)
             return True
-        del cls().data[tags_name]["tags"]
-        cls().data[tags_name]["tags"] = None
+        ComfyCache.flush(f'tags.{tags_name}')
         gc.collect()
         return True
 
@@ -78,7 +81,7 @@ class JtpTagManager(metaclass=Singleton):
         """
         Check if a tags file is installed in a directory
         """
-        return any(tags_name + ".json" in s for s in cls().list_installed())
+        return any(tags_name + ".json" in s for s in cls.list_installed())
     
     @classmethod
     def list_installed(cls) -> List[str]:
@@ -130,12 +133,22 @@ class JtpTagManager(metaclass=Singleton):
         return True
 
     @classmethod
-    def process_tags(cls, model_name: str, indices: Union[torch.Tensor, None], values: Union[torch.Tensor, None], exclude_tags: str, replace_underscore: bool, threshold: float, trailing_comma: bool) -> Tuple[str, Dict[str, float]]:
-        """
-        Process the tags for a model based on the indices and values from the model output
-        """
+    async def process_tags(cls, tags_name: str, indices: Union[torch.Tensor, None], values: Union[torch.Tensor, None], exclude_tags: str, replace_underscore: bool, threshold: float, trailing_comma: bool) -> Tuple[str, Dict[str, float]]:
+        from ..helpers.logger import ComfyLogger
+        await asyncio.sleep(0.1)
         corrected_excluded_tags = [tag.replace("_", " ").strip() for tag in exclude_tags.split(",") if not tag.isspace()]
-        tag_score = {cls().data[model_name]["tags"][indices[i]]: values[i].item() for i in range(indices.size(0)) if cls().data[model_name]["tags"][indices[i]] not in corrected_excluded_tags}
+        tag_score = {}
+        if indices is None or values is None:
+            ComfyLogger().log(f"No tags found for model {tags_name}", "WARNING")
+            return "", tag_score
+        ComfyLogger().log(f"Processing {len(values)} tags for model {tags_name}", "INFO")
+        tags_data = ComfyCache.get(f'tags.{tags_name}.tags')
+        for i in range(indices.size(0)):
+            index = indices[i].item()
+            if index in tags_data:
+                tag = tags_data[index]
+                if tag not in corrected_excluded_tags:
+                    tag_score[tag] = values[i].item()
         if not replace_underscore:
             tag_score = {key.replace(" ", "_"): value for key, value in tag_score.items()}
         tag_score = dict(sorted(tag_score.items(), key=lambda item: item[1], reverse=True))
