@@ -9,4 +9,5 @@ if not ComfyExtension().init(check_imports=["torch", "torchvision", "PIL", "aioh
 vars = ComfyNode().get_node_vars()
 for name, obj in vars.items():
     globals()[name] = obj
-__all__ = list(vars.keys())
+WEB_DIRECTORY = "./web"
+__all__ = list(vars.keys()) + ["WEB_DIRECTORY"]

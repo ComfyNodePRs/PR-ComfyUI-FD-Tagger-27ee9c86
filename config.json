@@ -1,5 +1,5 @@
 {
-	"name": "FDTagger",
+	"name": "furrydiffusion.FDTagger",
 	"logging": true,
 	"loglevel": "debug",
 	"huggingface_endpoint": "https://huggingface.co",

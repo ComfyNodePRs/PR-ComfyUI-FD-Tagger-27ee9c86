@@ -117,7 +117,7 @@ class ComfyExtension(metaclass=Singleton):
             for imp in check_imports:
                 spec = importlib.util.find_spec(imp)
                 if spec is None:
-                    ComfyLogger().log(f"{imp} is required, please ensure that the nessecary requirements are installed.",
+                    ComfyLogger().log(message=f"{imp} is required, please ensure that the nessecary requirements are installed.",
                         type="ERROR", always=True)
                     return False
         cls.install_js()

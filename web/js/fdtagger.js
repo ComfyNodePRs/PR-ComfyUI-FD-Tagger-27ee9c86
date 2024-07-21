@@ -80,7 +80,7 @@ app.registerExtension({
 	async beforeRegisterNodeDef(nodeType, nodeData, app) {
 		fdtagger.addStatusTagHandler(nodeType);
 
-		if (nodeData.name === "FD_Tagger|fdtagger") {
+		if (nodeData.name === "FDTagger|furrydiffusion") {
 			const onExecuted = nodeType.prototype.onExecuted;
 			nodeType.prototype.onExecuted = function (message) {
 				const r = onExecuted?.apply?.(this, arguments);

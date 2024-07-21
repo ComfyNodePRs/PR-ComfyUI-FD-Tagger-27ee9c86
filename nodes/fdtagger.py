@@ -147,8 +147,8 @@ JtpImageManager(cache_maxsize=ComfyExtensionConfig().get(property="image_cache_m
 JtpInference(device=ComfyExtensionConfig().get(property="device"))
 
 NODE_CLASS_MAPPINGS: Dict[str, Any] = {
-    "FD_Tagger|fdtagger": FDTagger,
+    "FDTagger|furrydiffusion": FDTagger,
 }
 NODE_DISPLAY_NAME_MAPPINGS: Dict[str, str] = {
-    "FD_Tagger|fdtagger": "FurryDiffusion Tagger 🐺",
+    "FDTagger|furrydiffusion": "FurryDiffusion Tagger 🐺",
 }
